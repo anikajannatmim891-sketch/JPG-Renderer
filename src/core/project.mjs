@@ -31,8 +31,9 @@ export async function serveProject(project) {
   const token = crypto.randomBytes(24).toString('hex');
   let bundle;
   if (['js','mjs','ts','jsx','tsx'].includes(project.kind)) {
-    const dependencies=process.env.UVRS_BROWSER_DEPENDENCIES||path.resolve(path.dirname(require.resolve('three')), '../..');
-    const result = await build({plugins:[{name:'project-boundary',setup(builder){builder.onLoad({filter:/.*/},async args=>{const real=await fs.realpath(args.path);if(!real.startsWith(project.root+path.sep)&&!real.startsWith(dependencies+path.sep))throw new Error('Bundled import escapes selected project: '+path.basename(real));return undefined;});}}],entryPoints:[project.file],bundle:true,write:false,platform:'browser',format:'esm',jsx:'automatic',nodePaths:[dependencies],logLevel:'silent',loader:{'.glsl':'text','.vert':'text','.frag':'text'}});
+    const dependencies=await fs.realpath(process.env.UVRS_BROWSER_DEPENDENCIES||path.resolve(path.dirname(require.resolve('three')), '../..'));
+    const inside=(base,file)=>{const relative=path.relative(base,file);return relative===''||(relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative));};
+    const result = await build({plugins:[{name:'project-boundary',setup(builder){builder.onLoad({filter:/.*/},async args=>{const real=await fs.realpath(args.path);if(!inside(project.root,real)&&!inside(dependencies,real))throw new Error('Bundled import escapes selected project: '+path.basename(real));return undefined;});}}],entryPoints:[project.file],bundle:true,write:false,platform:'browser',format:'esm',jsx:'automatic',nodePaths:[dependencies],logLevel:'silent',loader:{'.glsl':'text','.vert':'text','.frag':'text'}});
     bundle=result.outputFiles[0].contents;
   }
   const server = http.createServer(async(req,res)=>{
