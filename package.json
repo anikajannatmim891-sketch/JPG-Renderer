@@ -1,0 +1,103 @@
+{
+  "name": "universal-visual-render-studio",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local native-resolution artwork rendering studio",
+  "author": "Universal Visual Render Studio",
+  "license": "MIT",
+  "main": "dist/desktop/bootstrap.cjs",
+  "scripts": {
+    "build": "tsc --noEmit && node scripts/build.mjs",
+    "dev": "npm run build && npm run electron:install && electron .",
+    "test": "node tests/core.test.mjs && node tests/metadata.test.mjs",
+    "test:render": "node tests/acceptance.mjs",
+    "browser:install": "node scripts/browser.mjs",
+    "package:win": "npm run build && npm run resources:prepare && node scripts/browser.mjs win && electron-builder --win nsis --x64",
+    "smoke:packaged": "node scripts/packaged-smoke.mjs",
+    "test:ui": "node scripts/ui-smoke.mjs",
+    "electron:install": "node node_modules/electron/install.js",
+    "test:metadata": "node tests/metadata-acceptance.mjs",
+    "resources:prepare": "node scripts/resources.mjs"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "2.6.2",
+    "esbuild": "0.25.11",
+    "parse5": "8.1.0",
+    "playwright": "1.64.1",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "sharp": "0.35.5",
+    "svgo": "4.1.0",
+    "three": "0.180.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.0",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "electron": "45.2.3",
+    "electron-builder": "26.0.12",
+    "typescript": "5.9.3",
+    "vite": "7.1.12"
+  },
+  "build": {
+    "appId": "studio.universalvisual.render",
+    "productName": "Universal Visual Render Studio",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "!node_modules/exiftool-vendored.exe/**/*",
+      "!node_modules/exiftool-vendored.pl/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/sharp/**/*",
+      "node_modules/@img/**/*",
+      "node_modules/@resvg/**/*",
+      "node_modules/esbuild/**/*",
+      "node_modules/@esbuild/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "vendor/chromium",
+        "to": "chromium",
+        "filter": [
+          "chromium-*/**/*"
+        ]
+      },
+      {
+        "from": "vendor/exiftool",
+        "to": "exiftool"
+      },
+      {
+        "from": "dist/licenses",
+        "to": "licenses"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "assets/icon.ico",
+      "artifactName": "Universal-Visual-Render-Studio-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true
+    },
+    "npmRebuild": false
+  },
+  "optionalDependencies": {
+    "exiftool-vendored.exe": "13.60.0",
+    "exiftool-vendored.pl": "13.60.0"
+  }
+}

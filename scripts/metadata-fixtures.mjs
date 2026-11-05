@@ -1,0 +1,5 @@
+import fs from 'node:fs/promises';
+const value={title:'Gold arc — 金色 background',description:'Elegant layered gold artwork with spacious copy area. বিজ্ঞাপনের নকশা.',keywords:['gold','copy space','geometric','premium background','advertising','corporate','café','金色','layered paper','elegant','abstract','design'],rating:5};
+const block='<script type="application/json" id="uvrs-metadata">'+JSON.stringify(value).replaceAll('<','\\u003c')+'</script>';
+for(const [source,target]of [['layers.html','metadata.html'],['transparent.html','metadata-transparent.html'],['deterministic.html','metadata-deterministic.html']]){const html=await fs.readFile('tests/fixtures/'+source,'utf8');await fs.writeFile('tests/fixtures/'+target,html.replace('<!doctype html>','<!doctype html><meta charset="utf-8"><title>Fallback title</title><meta name="description" content="Fallback description"><meta name="keywords" content="fallback, background">'+block));}
+await fs.writeFile('tests/fixtures/metadata-expected.json',JSON.stringify(value,null,2));

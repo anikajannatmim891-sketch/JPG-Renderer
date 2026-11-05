@@ -1,0 +1,13 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import {execFileSync} from 'node:child_process';
+if(process.platform!=='win32')throw new Error('Installed application smoke requires Windows');
+const release=path.resolve('release');
+const installer=(await fs.readdir(release)).find(f=>/^Universal-Visual-Render-Studio-Setup-.*\.exe$/.test(f));
+if(!installer)throw new Error('NSIS installer missing');
+const installDir=path.join(os.tmpdir(),'uvrs-installed-'+Date.now());
+execFileSync(path.join(release,installer),['/S',`/D=${installDir}`],{stdio:'inherit',timeout:120000});
+const exe=path.join(installDir,'Universal Visual Render Studio.exe');await fs.access(exe);
+execFileSync(process.execPath,['scripts/ui-smoke.mjs'],{stdio:'inherit',env:{...process.env,UVRS_APP_EXECUTABLE:exe},timeout:180000});
+console.log('Installed NSIS application rendered real artwork:',exe);

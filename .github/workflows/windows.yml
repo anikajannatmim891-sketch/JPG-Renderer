@@ -1,0 +1,52 @@
+name: Windows production installer and metadata acceptance
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/vendor/chromium
+      UVRS_SOFTWARE_TEST: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.21.0'
+          cache: npm
+      - run: npm ci
+      - run: npm run electron:install
+      - run: npm run browser:install
+      - run: npm run resources:prepare
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:render
+      - run: npm run test:metadata
+      - run: npm run package:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      # Upload the actual installer even if an installed-app check subsequently
+      # fails, so failures remain inspectable rather than hiding the artifact.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Universal-Visual-Render-Studio-Setup-1.0.0
+          path: release/Universal-Visual-Render-Studio-Setup-1.0.0.exe
+          if-no-files-found: error
+      - run: npm run smoke:packaged
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Windows-render-and-metadata-evidence
+          path: |
+            test-output/**/*.json
+            test-output/**/*.jpg
+            test-output/**/*.png
+            test-output/**/*.webp
+            test-output/**/*.svg
+            test-output/**/*.eps
+          if-no-files-found: warn

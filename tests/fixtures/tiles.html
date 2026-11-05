@@ -1,0 +1,8 @@
+<!doctype html><meta charset="utf-8"><style>html,body{margin:0;overflow:hidden}canvas{display:block}</style><canvas></canvas><script>
+window.renderStudio={version:1,capabilities:{tiles:true},render({width,height,pixelRatio,seed,tile}){
+ const c=document.querySelector('canvas');c.width=tile?tile.width:width;c.height=tile?tile.height:height;c.style.width=c.width/pixelRatio+'px';c.style.height=c.height/pixelRatio+'px';
+ const g=c.getContext('2d');g.translate(-(tile?.x||0),-(tile?.y||0));g.fillStyle='#132d48';g.fillRect(0,0,width,height);
+ const step=128;for(let y=0;y<height;y+=step)for(let x=0;x<width;x+=step){g.fillStyle=`rgb(${30+(x/step*13+seed)%150},${55+(y/step*17)%140},${90+((x+y)/step*7)%130})`;g.fillRect(x+4,y+4,step-8,step-8);}
+ g.fillStyle='#eddaaa';for(let i=1;i<7;i++){const x=Math.floor(width*i/8),y=Math.floor(height*i/9);g.fillRect(x,y,Math.floor(width/70),Math.floor(height/4));}
+}};
+</script>
