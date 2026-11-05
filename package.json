@@ -57,7 +57,11 @@
       "node_modules/@img/**/*",
       "node_modules/@resvg/**/*",
       "node_modules/esbuild/**/*",
-      "node_modules/@esbuild/**/*"
+      "node_modules/@esbuild/**/*",
+      "node_modules/three/**/*",
+      "node_modules/react/**/*",
+      "node_modules/react-dom/**/*",
+      "node_modules/scheduler/**/*"
     ],
     "extraResources": [
       {

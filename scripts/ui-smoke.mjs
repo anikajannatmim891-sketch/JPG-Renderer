@@ -53,6 +53,11 @@ try{
  const report=JSON.parse(await fs.readFile(path.join(out,'GPU diagnostics.json')));assert.equal(report.gpu.software,true);
  // Confirm queue failures cannot prevent a subsequent valid request, without
  // simulating the renderer or metadata writer.
+ const waitingFile=path.join(external,'artwork source','waiting.html');await fs.writeFile(waitingFile,'<!doctype html><script>window.renderStudio={version:1,ready:new Promise(()=>{}),render(){}}</script>');
+ const waiting=await page.evaluate(source=>window.studio.call('drop',source),waitingFile);
+ const waitingId=await page.evaluate(id=>window.studio.call('enqueue',id,{width:1920,height:1080},true),waiting.id);
+ await page.locator('.job:has(.status.running)').getByRole('button',{name:'Cancel',exact:true}).click();
+ assert.equal((await waitJob(waitingId,60000)).status,'cancelled');
  const broken=await page.evaluate(source=>window.studio.call('drop',source),path.join(external,'artwork source','broken.html'));
  const brokenId=await page.evaluate(id=>window.studio.call('enqueue',id,{width:1920,height:1080},true),broken.id);
  assert.equal((await waitJob(brokenId,60000)).status,'failed');
@@ -77,6 +82,13 @@ try{
    assert.deepEqual(high.result.actual,{width,height});assert.equal(high.result.validation.errors.length,0);
    if(transparent)assert.equal(high.result.validation.alphaRange[0],0);
   }
+  for(const name of ['assets.html','react.tsx','three.ts']){
+   const p=await page.evaluate(file=>window.studio.call('drop',file),path.join(external,'artwork source',name));
+   const id=await page.evaluate(id=>window.studio.call('enqueue',id,{width:1920,height:1080,allowSoftware:true},true),p.id);
+   const j=await waitJob(id);assert.equal(j.status,'completed',j.error);
+   if(name==='three.ts')assert(j.result.gpu.webgl2);
+   records.push({label:'Installed '+name+' local fonts/assets or bundled browser dependency',output:j.result.output,actual:j.result.actual,metadataStatus:j.result.metadata.status});
+  }
   await app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},path.join(external,'artwork source','vector.svg'));
   await page.getByRole('button',{name:'Open artwork',exact:true}).first().click();
   await page.getByRole('button',{name:'Native SVG',exact:true}).click();
@@ -86,7 +98,7 @@ try{
  assert.deepEqual(errors,[]);
  for(const r of records){await fs.copyFile(r.output,path.join(evidence,path.basename(r.output)));await fs.copyFile(r.output+'.json',path.join(evidence,path.basename(r.output)+'.json'));}
  await fs.copyFile(path.join(out,'GPU diagnostics.json'),path.join(evidence,'GPU diagnostics.json'));
- await fs.writeFile(path.join(evidence,'smoke.json'),JSON.stringify({status:'passed',runtime,independentWorkingDirectory:external,records,verified:['import','manual metadata edit','JPEG XMP/IPTC','PNG XMP','default five-star rating','ordered keywords','file drag/drop','real alpha','preview/zoom','GPU report','failed asset recovery']},null,2));
+ await fs.writeFile(path.join(evidence,'smoke.json'),JSON.stringify({status:'passed',runtime,independentWorkingDirectory:external,records,verified:['import','manual metadata edit','JPEG XMP/IPTC','PNG XMP','default five-star rating','ordered keywords','file drag/drop','real alpha','preview/zoom','GPU report','failed asset recovery','active cancellation']},null,2));
  console.log('PASS desktop UI: source metadata, manual edit, JPEG, real drag/drop, RGBA PNG, readback and failed-job recovery');
 }finally{await app.close();}
 // Relaunch the same actual executable and profile; no dev server is involved.
