@@ -8,6 +8,8 @@ import sharp from 'sharp';
 import crypto from 'node:crypto';
 import {pipeline} from 'node:stream/promises';
 const require=createRequire(import.meta.url),exec=promisify(execFile);
+// libvips file handles must not remain cached while ExifTool replaces files on Windows.
+sharp.cache({files:0});
 export function exiftoolPath(){
   if(process.env.UVRS_EXIFTOOL)return process.env.UVRS_EXIFTOOL;
   const name=process.platform==='win32'?'exiftool-vendored.exe':'exiftool-vendored.pl';
@@ -38,7 +40,9 @@ export async function embedAndVerify(file,metadata,{format,signal}={}){
   const intended=metadata.value;
   if(!metadata.complete)throw new Error('Metadata incomplete: '+metadata.errors.join('; '));
   const before=await pixelDigest(file);
-  const tags={SourceFile:await fs.realpath(file),'XMP-dc:Title':intended.title,'XMP-dc:Description':intended.description,'XMP-dc:Subject':intended.keywords,'XMP-xmp:Rating':intended.rating};
+  const resolvedFile=await fs.realpath(file);
+  const canonicalFile=process.platform==='win32'?resolvedFile.replaceAll('\\','/'):resolvedFile;
+  const tags={SourceFile:canonicalFile,'XMP-dc:Title':intended.title,'XMP-dc:Description':intended.description,'XMP-dc:Subject':intended.keywords,'XMP-xmp:Rating':intended.rating};
   const warnings=[...metadata.warnings],legacy=[];
   if(format==='jpeg'){
     tags['IPTC:CodedCharacterSet']='UTF8';
@@ -49,7 +53,7 @@ export async function embedAndVerify(file,metadata,{format,signal}={}){
   }
   const folder=await fs.mkdtemp(path.join(os.tmpdir(),'uvrs-tags-'));
   let writer;
-  try{const json=path.join(folder,'metadata.json');await fs.writeFile(json,JSON.stringify([tags]),'utf8');writer=await runExiftool(['-overwrite_original','-charset','IPTC=UTF8','-json='+json,file],{signal});}
+  try{const json=path.join(folder,'metadata.json');await fs.writeFile(json,JSON.stringify([tags]),'utf8');writer=await runExiftool(['-overwrite_original','-charset','IPTC=UTF8','-json='+json,canonicalFile],{signal});}
   finally{await fs.rm(folder,{recursive:true,force:true});}
   if(!(writer.stdout+'\n'+writer.stderr).includes('1 image files updated'))throw new Error('ExifTool did not confirm an updated image: '+writer.stdout+writer.stderr);
   const messages=writer.stderr.split('\n').filter(line=>line.trim()&&!/image files (updated|unchanged)/.test(line));if(messages.length)warnings.push(messages.join('\n'));
