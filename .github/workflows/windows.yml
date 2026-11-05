@@ -1,11 +1,18 @@
 name: Windows production installer and metadata acceptance
 on:
   workflow_dispatch:
+    inputs:
+      installer_run_id:
+        description: 'Verify an unchanged installer artifact from a prior successful packaging step (leave empty for a full build)'
+        required: false
+        default: ''
+        type: string
   push:
     branches: [main]
   pull_request:
 permissions:
   contents: read
+  actions: read
 jobs:
   windows:
     runs-on: windows-latest
@@ -20,16 +27,40 @@ jobs:
           node-version: '22.21.0'
           cache: npm
       - run: npm ci
-      - run: npm run electron:install
-      - run: npm run browser:install
-      - run: npm run resources:prepare
-      - run: npm test
-      - run: npm run build
-      - run: npm run test:render
-      - run: npm run test:metadata
-      - run: npm run package:win
+      - if: ${{ inputs.installer_run_id == '' }}
+        run: npm run electron:install
+      - if: ${{ inputs.installer_run_id == '' }}
+        run: npm run browser:install
+      - if: ${{ inputs.installer_run_id == '' }}
+        run: npm run resources:prepare
+      - if: ${{ inputs.installer_run_id == '' }}
+        run: npm test
+      - if: ${{ inputs.installer_run_id == '' }}
+        run: npm run build
+      - if: ${{ inputs.installer_run_id == '' }}
+        run: npm run test:render
+      - if: ${{ inputs.installer_run_id == '' }}
+        run: npm run test:metadata
+      - if: ${{ inputs.installer_run_id == '' }}
+        run: npm run package:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - if: ${{ inputs.installer_run_id != '' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: Universal-Visual-Render-Studio-Setup-1.0.0
+          path: release
+          run-id: ${{ inputs.installer_run_id }}
+          github-token: ${{ github.token }}
+      - name: Record installer identity
+        shell: pwsh
+        env:
+          INSTALLER_SOURCE_RUN: ${{ inputs.installer_run_id || github.run_id }}
+        run: |
+          New-Item -ItemType Directory -Force test-output | Out-Null
+          $installer = Get-Item release/Universal-Visual-Render-Studio-Setup-1.0.0.exe
+          $digest = Get-FileHash $installer.FullName -Algorithm SHA256
+          @{ sourceRun = $env:INSTALLER_SOURCE_RUN; sha256 = $digest.Hash; bytes = $installer.Length } | ConvertTo-Json | Set-Content -Encoding utf8 test-output/installer-origin.json
       # Upload the actual installer even if an installed-app check subsequently
       # fails, so failures remain inspectable rather than hiding the artifact.
       - uses: actions/upload-artifact@v4

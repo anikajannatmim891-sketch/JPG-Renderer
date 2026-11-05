@@ -73,10 +73,10 @@ try{
    await page.getByRole('button',{name:'Open artwork',exact:true}).first().click();
    await page.getByText(filename,{exact:true}).first().waitFor();
    await page.getByLabel('Preserve transparency').setChecked(transparent);
-   await page.getByLabel('Format',{exact:true}).selectOption(format);
+   await page.getByLabel(/^Format/).selectOption(format);
    await page.getByLabel('Width',{exact:true}).fill(String(width));
    await page.getByLabel('Height',{exact:true}).fill(String(height));
-   await page.getByLabel('Rendering path',{exact:true}).selectOption(strategy);
+   await page.getByLabel(/^Rendering path/).selectOption(strategy);
    await page.getByLabel('Adobe Stock technical limits').check();
    const high=await exportAndWait(`Installed native ${width} × ${height} ${format} with metadata`);
    assert.deepEqual(high.result.actual,{width,height});assert.equal(high.result.validation.errors.length,0);
