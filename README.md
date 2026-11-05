@@ -2,7 +2,7 @@
 
 A local Electron artwork renderer with a React interface, isolated Playwright Chromium, Sharp sRGB raster exports, persistent serial queue, genuine SVG preservation, and automatic HTML-source metadata embedding/readback with ExifTool. Source is the artwork; there is no generator or template engine.
 
-**Windows release verification is pending. No tested Windows installer has been produced in this Linux session.** See [status and evidence](docs/STATUS.md) for exactly what ran and what remains.
+**Windows 1.0.0 is built and installation-tested.** [Download the installer artifact](https://github.com/anikajannatmim891-sketch/JPG-Renderer/actions/runs/41967594571/artifacts/13388541731), extract the ZIP, and run `Universal-Visual-Render-Studio-Setup-1.0.0.exe`. See [Windows release evidence](docs/WINDOWS-RELEASE.md) for checksums, executed tests and limitations.
 
 ## Develop and run
 
@@ -23,7 +23,7 @@ npm run dev
 Alternatively set `UVRS_CHROMIUM` to an installed Chromium executable, as used for Linux validation. That override is explicitly separate from testing the pinned runtime. Preserve Chromium sandboxing, TLS, dependency integrity checks and the platform proxy. For Linux desktop development, use a display/Xvfb and Chromium system libraries. Never use `--no-sandbox` to hide an environment failure.
 
 ```sh
-npm test                  # six logic/security/persistence/vector tests
+npm test                  # six core tests and eleven metadata tests
 npm run test:render       # actual high-resolution renderer regression exports
 npm run test:metadata     # 8K/12K image exports with embedded/read-back metadata
 node scripts/ui-smoke.mjs # actual Electron import/export interaction
@@ -31,7 +31,7 @@ npm run package:win       # run on Windows; bundles Chromium and builds NSIS
 npm run smoke:packaged    # silently installs NSIS, tests actual installed UI
 ```
 
-`package-lock.json` pins dependencies. `npm run package:win` installs its required pinned Chromium automatically. Core rendering is offline after installation. Installed users need no separate Node, Python, Chromium or Rust. The intended installer artifact is `release/Universal-Visual-Render-Studio-Setup-1.0.0.exe`. It is unsigned unless you supply your own signing configuration; Windows may show an unknown-publisher prompt. The Windows GitHub Actions workflow builds, installs and smoke-tests it and uploads the installer and real images; no Actions run was triggered from this session.
+`package-lock.json` pins dependencies. `npm run package:win` installs its required pinned Chromium automatically. Core rendering is offline after installation. Installed users need no separate Node, Python, Chromium or Rust. The installer artifact is `release/Universal-Visual-Render-Studio-Setup-1.0.0.exe`. It is unsigned unless you supply your own signing configuration; Windows may show an unknown-publisher prompt. The Windows GitHub Actions workflow builds, installs and smoke-tests it and uploads the installer and real images. [Run 41967594571](https://github.com/anikajannatmim891-sketch/JPG-Renderer/actions/runs/41967594571) passed, including installed native 8K/10K/12K JPEG and 8K transparent PNG exports with metadata readback.
 
 ## Use the application
 

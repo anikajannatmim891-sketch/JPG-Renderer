@@ -1,4 +1,11 @@
-# Current delivery status — metadata integration pass
+# Current Windows delivery status
+
+**Windows installer built, uploaded and installed-app verification passed.** Download: [Universal-Visual-Render-Studio-Setup-1.0.0.exe artifact](https://github.com/anikajannatmim891-sketch/JPG-Renderer/actions/runs/41967594571/artifacts/13388541731). The artifact ZIP contains the actual EXE.
+
+[Full Windows release evidence and SHA-256](WINDOWS-RELEASE.md) supersede the historical blockers below. The successful Windows workflow is [41967594571](https://github.com/anikajannatmim891-sketch/JPG-Renderer/actions/runs/41967594571). Native 8K/10K/12K JPEG, 8K transparent PNG, embedded five-star metadata readback, packaged dependencies, cancellation/recovery and relaunch passed from the NSIS-installed application. RTX 4060 remains untested; CI used SwiftShader. Installer is unsigned.
+
+# Historical metadata integration pass (before Windows release)
+
 
 Version: 1.0.0. **No Windows installer has yet been generated or installed in this environment.** Intended filename: `Universal-Visual-Render-Studio-Setup-1.0.0.exe`. A real Windows run remains required for release acceptance.
 
