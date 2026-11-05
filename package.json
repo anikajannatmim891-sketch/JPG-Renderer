@@ -13,7 +13,7 @@
     "test": "node tests/core.test.mjs && node tests/metadata.test.mjs",
     "test:render": "node tests/acceptance.mjs",
     "browser:install": "node scripts/browser.mjs",
-    "package:win": "npm run build && npm run resources:prepare && node scripts/browser.mjs win && electron-builder --win nsis --x64",
+    "package:win": "npm run build && npm run resources:prepare && node scripts/browser.mjs win && electron-builder --win nsis --x64 --publish never",
     "smoke:packaged": "node scripts/packaged-smoke.mjs",
     "test:ui": "node scripts/ui-smoke.mjs",
     "electron:install": "node node_modules/electron/install.js",
