@@ -113,6 +113,17 @@ jobs:
       - run: npm ci
       - run: npx playwright install-deps chromium
       - run: npm run browser:install
+      - name: Enable Chromium user namespaces on the Linux runner
+        shell: bash
+        run: |
+          chrome="$(find "$PLAYWRIGHT_BROWSERS_PATH" -path '*/chrome-linux64/chrome' -type f -print -quit)"
+          test -x "$chrome"
+          if [[ -f /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]] &&
+             [[ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns)" == 1 ]]; then
+            printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile uvrs-ci-chromium "%s" flags=(unconfined) {\n  userns,\n}\n' "$chrome" |
+              sudo tee /etc/apparmor.d/uvrs-ci-chromium >/dev/null
+            sudo apparmor_parser -r /etc/apparmor.d/uvrs-ci-chromium
+          fi
       - run: npm run test:graphics
       - uses: actions/upload-artifact@v4
         if: always()
