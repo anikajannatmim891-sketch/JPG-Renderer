@@ -1,22 +1,23 @@
-name: Windows production installer and metadata acceptance
+name: Windows production installer and acceptance
 on:
   workflow_dispatch:
     inputs:
-      installer_run_id:
-        description: 'Verify an unchanged installer artifact from a prior successful packaging step (leave empty for a full build)'
+      publish:
+        description: Publish the verified installer from this commit as a GitHub Release
         required: false
-        default: ''
-        type: string
+        default: false
+        type: boolean
   push:
     branches: [main]
   pull_request:
 permissions:
   contents: read
-  actions: read
 jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 60
+    permissions:
+      contents: write
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/vendor/chromium
       UVRS_SOFTWARE_TEST: '1'
@@ -27,48 +28,37 @@ jobs:
           node-version: '22.21.0'
           cache: npm
       - run: npm ci
-      - if: ${{ inputs.installer_run_id == '' }}
-        run: npm run electron:install
-      - if: ${{ inputs.installer_run_id == '' }}
-        run: npm run browser:install
-      - if: ${{ inputs.installer_run_id == '' }}
-        run: npm run resources:prepare
-      - if: ${{ inputs.installer_run_id == '' }}
-        run: npm test
-      - if: ${{ inputs.installer_run_id == '' }}
-        run: npm run build
-      - if: ${{ inputs.installer_run_id == '' }}
-        run: npm run test:render
-      - if: ${{ inputs.installer_run_id == '' }}
-        run: npm run test:metadata
-      - if: ${{ inputs.installer_run_id == '' }}
-        run: npm run package:win
+      - run: npm run electron:install
+      - run: npm run browser:install
+      - run: npm run resources:prepare
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:render
+      - run: npm run test:metadata
+      - run: npm run test:autopilot
+        env:
+          UVRS_FULL_BATCH: '1'
+      - run: npm run package:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-      - if: ${{ inputs.installer_run_id != '' }}
-        uses: actions/download-artifact@v4
-        with:
-          name: Universal-Visual-Render-Studio-Setup-1.0.0
-          path: release
-          run-id: ${{ inputs.installer_run_id }}
-          github-token: ${{ github.token }}
       - name: Record installer identity
         shell: pwsh
-        env:
-          INSTALLER_SOURCE_RUN: ${{ inputs.installer_run_id || github.run_id }}
         run: |
-          New-Item -ItemType Directory -Force test-output | Out-Null
-          $installer = Get-Item release/Universal-Visual-Render-Studio-Setup-1.0.0.exe
+          $version = node -p "require('./package.json').version"
+          $installer = Get-Item "release/Universal-Visual-Render-Studio-Setup-$version.exe"
           $digest = Get-FileHash $installer.FullName -Algorithm SHA256
-          @{ sourceRun = $env:INSTALLER_SOURCE_RUN; sha256 = $digest.Hash; bytes = $installer.Length } | ConvertTo-Json | Set-Content -Encoding utf8 test-output/installer-origin.json
-      # Upload the actual installer even if an installed-app check subsequently
-      # fails, so failures remain inspectable rather than hiding the artifact.
+          New-Item -ItemType Directory -Force test-output | Out-Null
+          @{ sourceRun = $env:GITHUB_RUN_ID; commit = $env:GITHUB_SHA; sha256 = $digest.Hash; bytes = $installer.Length } | ConvertTo-Json | Set-Content -Encoding utf8 test-output/installer-origin.json
+          "$($digest.Hash.ToLower())  $($installer.Name)" | Set-Content -Encoding ascii "$($installer.FullName).sha256"
+          "UVRS_VERSION=$version" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      - run: npm run smoke:packaged
       - uses: actions/upload-artifact@v4
         with:
-          name: Universal-Visual-Render-Studio-Setup-1.0.0
-          path: release/Universal-Visual-Render-Studio-Setup-1.0.0.exe
+          name: Universal-Visual-Render-Studio-Setup-${{ env.UVRS_VERSION }}
+          path: |
+            release/*.exe
+            release/*.sha256
           if-no-files-found: error
-      - run: npm run smoke:packaged
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -81,3 +71,15 @@ jobs:
             test-output/**/*.svg
             test-output/**/*.eps
           if-no-files-found: warn
+      - name: Publish verified Windows installer
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = "v$env:UVRS_VERSION"
+          $installer = "release/Universal-Visual-Render-Studio-Setup-$env:UVRS_VERSION.exe"
+          $notes = "Windows x64 NSIS installer. The build passed the renderer, ExifTool readback, Autopilot and installed-app acceptance checks. CI used software WebGL. Commit: $env:GITHUB_SHA."
+          gh release create $tag $installer "$installer.sha256" --target $env:GITHUB_SHA --title "Universal Visual Render Studio $env:UVRS_VERSION" --notes $notes
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }

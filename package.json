@@ -1,6 +1,6 @@
 {
   "name": "universal-visual-render-studio",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
   "description": "Local native-resolution artwork rendering studio",
@@ -18,7 +18,8 @@
     "test:ui": "node scripts/ui-smoke.mjs",
     "electron:install": "node node_modules/electron/install.js",
     "test:metadata": "node tests/metadata-acceptance.mjs",
-    "resources:prepare": "node scripts/resources.mjs"
+    "resources:prepare": "node scripts/resources.mjs",
+    "test:autopilot": "node tests/autopilot-acceptance.mjs"
   },
   "dependencies": {
     "@resvg/resvg-js": "2.6.2",

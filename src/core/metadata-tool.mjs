@@ -29,11 +29,26 @@ export async function runExiftool(args,{signal}={}){
   }finally{await fs.rm(directory,{recursive:true,force:true});}
 }
 export async function probeMetadataTool(){try{const {stdout}=await runExiftool(['-ver']);return {available:true,version:stdout.trim()};}catch(e){return {available:false,error:e.message};}}
-export async function readEmbeddedMetadata(file){
-  const {stdout}=await runExiftool(['-json','-G1','-s','-n','-XMP-dc:Title','-XMP-dc:Description','-XMP-dc:Subject','-XMP-xmp:Rating','-IPTC:Caption-Abstract','-IPTC:Keywords','-IPTC:ObjectName','-IPTC:Headline','-IPTC:CodedCharacterSet',file]);
-  const tags=JSON.parse(stdout)[0];if(tags.Error)throw new Error(tags.Error);
-  const list=tags['XMP-dc:Subject'];
-  return {title:tags['XMP-dc:Title']??'',description:tags['XMP-dc:Description']??'',keywords:Array.isArray(list)?list:list===undefined?[]:[list],rating:tags['XMP-xmp:Rating'],tags};
+const keywordTags = new Set(['XMP-dc:Subject', 'IPTC:Keywords']);
+const textTags = ['XMP-dc:Title', 'XMP-dc:Description', ...keywordTags, 'IPTC:Caption-Abstract',
+  'IPTC:ObjectName', 'IPTC:Headline', 'IPTC:CodedCharacterSet'];
+const ratingTag = 'XMP-xmp:Rating';
+
+export async function readEmbeddedMetadata(file, {signal} = {}) {
+  // JSONQ quotes numeric-looking tag values before JSON parsing. Converting a
+  // parsed number to text alone cannot recover the original lexical form.
+  const {stdout} = await runExiftool(['-json', '-api', 'StructFormat=JSONQ', '-G1', '-s', '-n',
+    ...[...textTags, ratingTag].map(tag => '-' + tag), path.resolve(file)], {signal});
+  const tags = JSON.parse(stdout)[0];
+  if (!tags || tags.Error) throw new Error(tags?.Error || 'ExifTool returned no image tags');
+  for (const tag of textTags) {
+    const value = tags[tag];
+    if (value === undefined) continue;
+    tags[tag] = keywordTags.has(tag) ? [value].flat().map(String) : String(value);
+  }
+  if (tags[ratingTag] !== undefined) tags[ratingTag] = Number(tags[ratingTag]);
+  return {title:tags['XMP-dc:Title'] ?? '', description:tags['XMP-dc:Description'] ?? '',
+    keywords:tags['XMP-dc:Subject'] ?? [], rating:tags[ratingTag], tags};
 }
 export async function pixelDigest(file){const hash=crypto.createHash('sha256');await pipeline(sharp(file,{limitInputPixels:300e6}).ensureAlpha().raw(),hash);return hash.digest('hex');}
 export async function embedAndVerify(file,metadata,{format,signal}={}){
@@ -59,7 +74,7 @@ export async function embedAndVerify(file,metadata,{format,signal}={}){
   const messages=writer.stderr.split('\n').filter(line=>line.trim()&&!/image files (updated|unchanged)/.test(line));if(messages.length)warnings.push(messages.join('\n'));
   // A fresh process independently reopens the actual image. No writer response is
   // used as proof that a tag survived.
-  const actual=await readEmbeddedMetadata(file);
+  const actual=await readEmbeddedMetadata(file,{signal});
   for(const key of ['title','description','rating'])if(actual[key]!==intended[key])throw new Error(`Metadata readback mismatch: ${key}`);
   if(actual.keywords.length!==intended.keywords.length)throw new Error('Metadata readback mismatch: keyword count');
   for(let i=0;i<intended.keywords.length;i++)if(actual.keywords[i]!==intended.keywords[i])throw new Error(`Metadata readback mismatch: keyword ${i+1} (order/content)`);

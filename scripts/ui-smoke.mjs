@@ -12,10 +12,12 @@ const executablePath=process.env.UVRS_APP_EXECUTABLE||undefined;
 const args=executablePath?[]:['.'];if(process.platform==='linux'&&!process.env.DISPLAY)args.push('--ozone-platform=headless');
 const profile=path.join(external,'user profile');
 const env={...process.env,UVRS_CHROMIUM:executablePath?'':process.env.UVRS_CHROMIUM||'',UVRS_EXIFTOOL:'',UVRS_SOFTWARE_TEST:'1',UVRS_TEST_USER_DATA:profile};
-const app=await electron.launch({executablePath,args,cwd:executablePath?external:process.cwd(),env,timeout:60000});
+const app=await electron.launch({chromiumSandbox:true,executablePath,args,cwd:executablePath?external:process.cwd(),env,timeout:60000});
 const records=[];
 try{
  const page=await app.firstWindow(),errors=[];page.on('pageerror',e=>errors.push(e.message));
+ await page.getByRole('heading',{name:'Autopilot',exact:true}).waitFor();
+ await page.getByRole('button',{name:'Advanced Studio',exact:true}).click();
  await page.getByText('Your source. Every pixel.').waitFor();
  const runtime=await app.evaluate(({app})=>({packaged:app.isPackaged,resources:process.resourcesPath,chromium:process.env.UVRS_CHROMIUM,exiftool:process.env.UVRS_EXIFTOOL,esbuild:process.env.ESBUILD_BINARY_PATH}));
  if(executablePath){assert.equal(runtime.packaged,true);for(const k of ['chromium','exiftool','esbuild']){assert(runtime[k]?.startsWith(runtime.resources),`${k} must come from installed resources`);await fs.access(runtime[k]);}}
@@ -95,6 +97,26 @@ try{
   await page.waitForFunction(()=>document.body.textContent.includes('Native editable SVG:'));
   const vectors=(await fs.readdir(out)).filter(f=>f.endsWith('.svg'));assert(vectors.length>0);assert.match(await fs.readFile(path.join(out,vectors[0]),'utf8'),/<path/);
  }
+ await page.getByRole('button',{name:'Autopilot',exact:true}).click();
+ await page.getByRole('heading',{name:'Autopilot',exact:true}).waitFor();
+ const batchFile=path.join(external,'artwork source','greeting-card.html');
+ await app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},batchFile);
+ await page.getByRole('button',{name:'Add Files',exact:true}).click();
+ await page.getByRole('button',{name:'greeting-card.html',exact:true}).waitFor();
+ await page.getByLabel('Global Resolution Preset').selectOption('4K');
+ await page.getByRole('button',{name:'Start Autopilot',exact:false}).click();
+ const batchId=await page.evaluate(async()=> (await window.studio.call('state')).jobs.find(j=>'autopilotImport' in j.input)?.id);
+ assert(batchId);
+ const batch=await waitJob(batchId,180000);
+ assert.equal(batch.status,'completed',batch.error);
+ assert.equal(batch.result.actual.width*1480,batch.result.actual.height*1000);
+ assert.equal((await readEmbeddedMetadata(batch.result.output)).keywords[3],'2027');
+ assert.equal((await readEmbeddedMetadata(batch.result.output)).keywords[5],'007');
+ await page.getByRole('button',{name:'Thumbnail',exact:true}).click();
+ await page.getByAltText('Thumbnail of completed JPEG').waitFor();
+ await page.screenshot({path:path.join(evidence,'autopilot.png')});
+ await fs.copyFile(batch.result.output,path.join(evidence,path.basename(batch.result.output)));
+ console.log('PASS Electron Autopilot: real portrait export, ordered numeric metadata and completed-image thumbnail');
  assert.deepEqual(errors,[]);
  for(const r of records){await fs.copyFile(r.output,path.join(evidence,path.basename(r.output)));await fs.copyFile(r.output+'.json',path.join(evidence,path.basename(r.output)+'.json'));}
  await fs.copyFile(path.join(out,'GPU diagnostics.json'),path.join(evidence,'GPU diagnostics.json'));
@@ -102,5 +124,5 @@ try{
  console.log('PASS desktop UI: source metadata, manual edit, JPEG, real drag/drop, RGBA PNG, readback and failed-job recovery');
 }finally{await app.close();}
 // Relaunch the same actual executable and profile; no dev server is involved.
-const relaunched=await electron.launch({executablePath,args,cwd:executablePath?external:process.cwd(),env,timeout:60000});
-try{const page=await relaunched.firstWindow();await page.getByText('Your source. Every pixel.').waitFor();const state=await page.evaluate(()=>window.studio.call('state'));assert(state.jobs.some(j=>j.status==='completed'));console.log('PASS desktop relaunch and persistent queue');}finally{await relaunched.close();}
+const relaunched=await electron.launch({chromiumSandbox:true,executablePath,args,cwd:executablePath?external:process.cwd(),env,timeout:60000});
+try{const page=await relaunched.firstWindow();await page.getByRole('heading',{name:'Autopilot',exact:true}).waitFor();const state=await page.evaluate(()=>window.studio.call('state'));assert(state.jobs.some(j=>j.status==='completed'));console.log('PASS desktop relaunch and persistent queue');}finally{await relaunched.close();}

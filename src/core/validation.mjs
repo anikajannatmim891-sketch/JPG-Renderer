@@ -1,3 +1,4 @@
+import {profiles} from './dimensions.mjs';
 import sharp from 'sharp';
 import fs from 'node:fs/promises';
 import crypto from 'node:crypto';
@@ -5,9 +6,10 @@ export function validateSettings(s) {
   for (const key of ['width','height','designWidth','quality','seed','time']) if(!Number.isFinite(s[key])) throw new Error(`Invalid ${key}`);
   if(!Number.isInteger(s.width)||!Number.isInteger(s.height)||s.width<1||s.height<1||s.width>65535||s.height>65535) throw new Error('Dimensions must be integers from 1 to 65535');
   if(s.width*s.height>250e6) throw new Error('This release limits exports to 250 MP for memory safety');
-  if(s.designWidth<1||s.designWidth>16384||s.quality<1||s.quality>100||s.time<0) throw new Error('Invalid design width, quality or time');
+  if(s.designWidth<1||s.designWidth>16384||!Number.isInteger(s.quality)||s.quality<1||s.quality>100||s.time<0||
+    (s.qualityFloor!==undefined&&(!Number.isInteger(s.qualityFloor)||s.qualityFloor<1||s.qualityFloor>s.quality))) throw new Error('Invalid design width, quality or time');
   if(!['jpeg','png','webp'].includes(s.format)) throw new Error('Unsupported raster format');
-  if(!['direct','tiled'].includes(s.strategy)) throw new Error('Unsupported render strategy');
+  if(!['auto','direct','tiled'].includes(s.strategy)) throw new Error('Unsupported render strategy');
   if(s.transparent && s.format==='jpeg') throw new Error('JPEG cannot preserve transparency. Select PNG.');
   if(s.stock) {
     const mp=s.width*s.height/1e6;
@@ -34,8 +36,9 @@ export async function inspectRaster(file,s,history=[]) {
   const errors=[];
   if(meta.width!==s.width||meta.height!==s.height) errors.push('Source/export resolution mismatch');
   if(s.transparent&&(!meta.hasAlpha||minAlpha===255)) errors.push('Transparent export requested but no transparent pixels detected');
-  if(!meta.icc) errors.push('Missing sRGB profile');
-  if(s.stock && data.length>45_000_000) errors.push('File exceeds the 45 MB Stock limit; reduce JPEG quality explicitly');
+  if(!meta.icc || !meta.icc.toString('latin1').replaceAll('\0','').toLowerCase().includes('srgb')) errors.push('Missing or invalid sRGB profile');
+  if(s.profile && data.length>profiles[s.profile].maxBytes) errors.push('File exceeds the selected stock profile limit');
+  if(s.stock && !s.profile && data.length>45_000_000) errors.push('File exceeds the 45 MB Stock limit; reduce JPEG quality explicitly');
   if(s.stock&&(meta.width*meta.height<4e6||meta.width*meta.height>100e6)) errors.push('Outside Stock megapixel limits');
   return {width:meta.width,height:meta.height,megapixels:meta.width*meta.height/1e6,bytes:data.length,format:meta.format,hasAlpha:meta.hasAlpha,alphaRange:[minAlpha,maxAlpha],srgb:!!meta.icc,hash,fingerprint,warnings,errors,variance};
 }

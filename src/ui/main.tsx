@@ -1,20 +1,33 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import './style.css';
+import {Autopilot} from './Autopilot';
 import {MetadataPanel,type MetadataConfig,type MetadataReport} from './Metadata';
 type Settings={width:number;height:number;designWidth:number;format:string;quality:number;transparent:boolean;stock:boolean;time:number;seed:number;strategy:string;allowSoftware:boolean;allowedOrigins:string[];timeout:number};
 type Project={id:string;name:string;entry:string;kind:string;files:string[];manifest:Record<string,unknown>;metadata:MetadataReport};
 type Result={metadata?:{status:string;complete:boolean;readback?:unknown};output:string;durationMs:number;actual:{width:number;height:number};gpu:Record<string,unknown>;validation:{bytes:number;megapixels:number;warnings:string[];alphaRange:number[];srgb:boolean}};
 type Job={id:string;status:string;input:{preview?:boolean;settings:Settings;source:string};error?:string;recovery?:unknown;result?:Result;progress:{phase:string;message:string}[]};
-declare global{interface Window{studio:{call:(channel:string,...args:unknown[])=>Promise<any>;filePath:(file:File)=>string;onJobs:(fn:(jobs:Job[])=>void)=>()=>void}}}
+declare global{interface Window{studio:{call:(channel:string,...args:unknown[])=>Promise<any>;filePath:(file:File)=>string;onJobs:(fn:(jobs:Job[],paused:boolean)=>void)=>()=>void}}}
 const initial:Settings={width:3840,height:2160,designWidth:1920,format:'jpeg',quality:96,transparent:false,stock:false,time:0,seed:1,strategy:'direct',allowSoftware:false,allowedOrigins:[],timeout:30000};
-function App(){
+function App() {
+ const [view,setView]=useState<'autopilot'|'advanced'>('autopilot');
+ return <div className="studio-shell">
+   <div className="studio-navigation"><div className="studio-brand"><span aria-hidden="true">◈</span> Universal Visual Render Studio</div>
+     <nav aria-label="Studio mode">
+       <button className={view==='autopilot'?'current':''} onClick={()=>setView('autopilot')}>Autopilot</button>
+       <button className={view==='advanced'?'current':''} onClick={()=>setView('advanced')}>Advanced Studio</button>
+     </nav>
+   </div>
+   {view==='autopilot' ? <Autopilot/> : <AdvancedStudio/>}
+ </div>;
+}
+function AdvancedStudio(){
  const [s,setS]=useState(initial),[project,setProject]=useState<Project|null>(null),[jobs,setJobs]=useState<Job[]>([]),[destination,setDestination]=useState(''),[history,setHistory]=useState<string[]>([]),[adapters,setAdapters]=useState<Record<string,any>>({}),[error,setError]=useState(''),[message,setMessage]=useState(''),[tab,setTab]=useState('preview'),[source,setSource]=useState(''),[preview,setPreview]=useState(''),[result,setResult]=useState<Result|null>(null),[zoom,setZoom]=useState(1),[fit,setFit]=useState(true),[busy,setBusy]=useState(false),[remote,setRemote]=useState('');
  const [metadataReport,setMetadataReport]=useState<MetadataReport|null>(null),[metadataConfig,setMetadataConfig]=useState<MetadataConfig>({enabled:true,defaultRating:5,maxKeywords:49}),[metadataOverrides,setMetadataOverrides]=useState<Record<string,unknown>>({});
  const viewed=useRef(''),viewport=useRef<HTMLDivElement>(null),drag=useRef<{x:number;y:number;left:number;top:number}|null>(null);
  const call=async(channel:string,...args:unknown[])=>{setError('');try{return await window.studio.call(channel,...args);}catch(e){setError((e as Error).message);return null;}};
  useEffect(()=>{window.studio.call('state').then(data=>{setS({...initial,...data.settings});setRemote((data.settings.allowedOrigins||[]).join('\n'));setDestination(data.destination||'');setHistory(data.history);setAdapters(data.adapters);setJobs(data.jobs);setMetadataConfig(data.metadata||{enabled:true,defaultRating:5,maxKeywords:49});}).catch(e=>setError(e.message));return window.studio.onJobs(setJobs);},[]);
- useEffect(()=>{const complete=[...jobs].reverse().find(j=>j.status==='completed'&&j.id!==viewed.current);if(!complete)return;const latest=[...jobs].reverse().find(j=>j.status==='completed');if(!latest||latest.id===viewed.current)return;viewed.current=latest.id;window.studio.call('preview',latest.id).then(v=>{setPreview(v.url);setResult(v.result);setTab('preview');}).catch(e=>setError(e.message));},[jobs]);
+ useEffect(()=>{const complete=[...jobs].reverse().find(j=>j.status==='completed'&&!('autopilotImport' in j.input)&&j.id!==viewed.current);if(!complete)return;const latest=[...jobs].reverse().find(j=>j.status==='completed'&&!('autopilotImport' in j.input));if(!latest||latest.id===viewed.current)return;viewed.current=latest.id;window.studio.call('preview',latest.id).then(v=>{setPreview(v.url);setResult(v.result);setTab('preview');}).catch(e=>setError(e.message));},[jobs]);
  const opened=(p:Project|null)=>{if(!p)return;setProject(p);setMetadataReport(p.metadata);setMetadataOverrides({});setPreview('');setResult(null);setMessage('Source opened. Preview renders the selected final resolution, then fits the full output to the viewport.');const m=p.manifest;setS(old=>({...old,...Object.fromEntries(['width','height','designWidth','seed','time','transparent'].filter(k=>typeof m[k]===typeof (old as any)[k]).map(k=>[k,m[k]]))}));};
  useEffect(()=>{if(!project)return;const timer=setTimeout(()=>{window.studio.call('metadata-validate',project.id,{...metadataConfig,overrides:metadataOverrides}).then(setMetadataReport).catch(e=>setError(e.message));},180);return()=>clearTimeout(timer);},[project,metadataConfig,metadataOverrides,jobs.filter(j=>j.status==='completed').length]);
  const editMetadata=(key:string,value:unknown)=>{setMetadataOverrides(old=>({...old,[key]:value}));setMetadataReport(old=>old?{...old,value:{...old.value,[key]:value}}:old);};

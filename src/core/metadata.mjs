@@ -18,7 +18,7 @@ export function extractHtmlMetadata(html){
       if(value!==undefined){
         if(['dc.title','dcterms.title','title','og:title'].includes(name)&&!own(standard,'title'))standard.title=value;
         if(['description','dc.description','dcterms.description'].includes(name)&&!own(standard,'description'))standard.description=value;
-        if(['keywords','dc.subject','dcterms.subject'].includes(name)){const list=value.split(',');standard.keywords=[...(standard.keywords||[]),...list];}
+        if(['keywords','dc.subject','dcterms.subject'].includes(name)){const list=value.split(',').map(k=>k.trim());standard.keywords=[...(standard.keywords||[]),...list];}
         if(['rating','xmp.rating','xmp:rating'].includes(name)&&!own(standard,'rating'))standard.rating=Number(value);
       }
     }
@@ -33,7 +33,13 @@ export function extractHtmlMetadata(html){
   return {standard,structured,title,warnings,errors};
 }
 export async function readSourceMetadata(project){
-  if(!['html','htm'].includes(project.kind))return {standard:{},structured:{},title:'',warnings:[],errors:[]};
+  const projectMetadata=project.manifest?.metadata;
+  const result=await readMarkupMetadata(project);
+  if(projectMetadata!==undefined)try{result.project=fields(projectMetadata);}catch(e){result.errors.push('Project metadata: '+e.message);}
+  return result;
+}
+async function readMarkupMetadata(project){
+  if(!['html','htm','svg'].includes(project.kind))return {standard:{},structured:{},title:'',warnings:[],errors:[]};
   const stat=await fs.stat(project.file);if(stat.size>10_000_000)throw new Error('HTML exceeds the 10 MB metadata parsing limit');
   return extractHtmlMetadata(await fs.readFile(project.file,'utf8'));
 }
@@ -42,7 +48,7 @@ export function resolveMetadata(extracted,runtime,options={}){
   if(runtime!==undefined&&runtime!==null)try{runtimeFields=fields(runtime);}catch(e){runtimeError='Runtime metadata: '+e.message;}
   const value={},sources={};
   for(const key of keys){
-    const layers=[[config.overrides,'user edit'],[extracted.structured,'uvrs-metadata JSON'],[runtimeFields,'runtime object'],[extracted.standard,'HTML meta tags']];
+    const layers=[[config.overrides,'user edit'],[extracted.structured,'uvrs-metadata JSON'],[runtimeFields,'runtime object'],[extracted.project,'project manifest'],[extracted.standard,'HTML meta tags']];
     const match=layers.find(([obj])=>own(obj,key));
     if(match){value[key]=match[0][key];sources[key]=match[1];}
     else if(key==='title'&&extracted.title){value.title=extracted.title;sources.title='document title';}
@@ -50,13 +56,13 @@ export function resolveMetadata(extracted,runtime,options={}){
   }
   const manualComplete=['title','description','keywords'].every(k=>own(config.overrides,k));
   const warnings=[...(extracted.warnings||[]),...(manualComplete?(extracted.errors||[]).map(e=>'Source error overridden by manual metadata: '+e):[])],errors=manualComplete?[]:[...(extracted.errors||[])];if(runtimeError)errors.push(runtimeError);
-  for(const k of ['title','description']){if(typeof value[k]!=='string'){errors.push(`${k} must be text`);value[k]='';}else value[k]=value[k].trim();}
-  if(typeof value.keywords==='string')value.keywords=value.keywords.split(',');
-  if(!Array.isArray(value.keywords)||value.keywords.some(k=>typeof k!=='string')){errors.push('Keywords must be an array of strings or comma-separated text');value.keywords=[];}else value.keywords=value.keywords.map(k=>k.trim());
-  if(!value.title)errors.push('Title is missing');
-  if(!value.description)errors.push('Description is missing');
+  for(const k of ['title','description']){if(typeof value[k]!=='string'){errors.push(`${k} must be text`);value[k]='';}else if(sources[k]==='user edit')value[k]=value[k].trim();}
+  if(typeof value.keywords==='string')value.keywords=value.keywords.split(',').map(k=>k.trim());
+  if(!Array.isArray(value.keywords)||value.keywords.some(k=>typeof k!=='string')){errors.push('Keywords must be an array of strings or comma-separated text');value.keywords=[];}else if(sources.keywords==='user edit')value.keywords=value.keywords.map(k=>k.trim());
+  if(!value.title.trim())errors.push('Title is missing');
+  if(!value.description.trim())errors.push('Description is missing');
   if(!value.keywords.length)errors.push('Keywords are missing');
-  if(value.keywords.some(k=>!k))errors.push('Empty keyword entries must be removed explicitly');
+  if(value.keywords.some(k=>!k.trim()))errors.push('Empty keyword entries must be removed explicitly');
   const seen=new Set(),duplicates=[];for(const k of value.keywords){const folded=k.toLocaleLowerCase('en-US');if(seen.has(folded))duplicates.push(k);seen.add(folded);}
   if(duplicates.length)warnings.push('Duplicate keywords: '+duplicates.join(', '));
   if(value.keywords.length>config.maxKeywords)errors.push(`Keyword count ${value.keywords.length} exceeds configured maximum ${config.maxKeywords}`);

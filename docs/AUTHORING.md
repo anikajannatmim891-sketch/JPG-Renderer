@@ -86,3 +86,33 @@ Standalone SVG export preserves actual geometry, groups, gradients and source di
 EPS uses a discovered, version-probed Inkscape executable and a separate confirmation. Filters/masks/transparency are rejected conservatively. Fonts are outlined by Inkscape. EPS is checked for an EPSF header; appearance still needs review. Illustrator native AI automation, Blender and Python adapters are unavailable in this release and are labelled as such. Do not rename SVG/PDF/EPS to AI.
 
 `src/core/adapters.ts` documents extension interfaces. Extensions are trusted host code integrated by a developer; the app does not execute plugin code found in an artwork folder. Core rendering needs no external adapter.
+
+## Autopilot compatibility
+
+For an artwork that can fill any viewport, declare `designWidth` and `designHeight` in
+`render-studio.json`, or expose `window.renderStudio.design = {width, height}`. Autopilot compares
+these with stable computed artwork bounds. A filename with `__css2400x1000__10k10200x4250.html`
+or `_W1280_10K-8192x10240.html` supplies a design hint. A convention containing an export size
+does not override the chosen resolution preset.
+
+An existing Canvas 2D initialization can size its backing store with `devicePixelRatio` and draw
+at its original logical dimensions. Autopilot can also adapt a single unscaled Canvas 2D with
+fixed `CW` and `CH` property assignments, matching CSS dimensions, and logical drawing
+operations. Backing-store reads, pixel writes, filters, absolute transform resets, and
+canvas-to-canvas draws need native DPR handling or a render contract for that pattern.
+
+Autopilot can tile a single fullscreen WebGL pass that uses `gl_FragCoord` and an identifiable
+two-component resolution uniform. It checks the adapter against the original diagnostic image
+before capturing. Render-to-texture, depth/discard, multi-pass programs, mixed DOM overlays,
+and shaders whose geometry or effects depend on tile size require an explicit tile contract
+when direct capture fails.
+
+A compatible Three.js `renderStudio` contract can opt into the camera adapter with
+`capabilities: {tiles: true, threeViewOffset: true}` and `threeCamera: camera`. In tile mode,
+size the drawing buffer to `tile.width` by `tile.height` physical pixels and preserve the
+full-frame camera aspect. Autopilot sets and clears the camera view offset around the render.
+The contract can specify `capabilities.tilePadding` in CSS pixels. Test postprocessing and
+screen-space effects across tile boundaries before enabling tiles.
+
+The optional manifest `metadata` object accepts the same title, description, ordered keywords,
+and rating as `uvrs-metadata`. It sits below runtime metadata and above standard HTML tags.
