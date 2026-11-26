@@ -280,4 +280,27 @@ await run('Restart during metadata resumes a real encoded checkpoint without the
   }
 });
 
+await run('Reopening an already published checkpoint confirms the same JPEG',async()=>{
+  let receipt;
+  const out=path.join(runDirectory,'publication');
+  await fs.mkdir(out);
+  const initial=await renderArtwork({source:source('greeting-card.html'),destination:out,
+    autopilot:{...autopilotDefaults,preset:'4K'},writeManifest:false,onCheckpoint:value=>{receipt=value;}});
+  // The encoded checkpoint still exists as it would if the process stopped
+  // after the atomic file link but before the completed job transaction.
+  await fs.access(receipt.encoded);
+  const verified=await renderArtwork({recovery:receipt,writeManifest:false});
+  assert.equal(verified.output,initial.output);
+  assert.equal(verified.metadata.pixelDigest,initial.metadata.pixelDigest);
+  assert.equal((await fs.readdir(out)).length,1);
+  await assert.rejects(fs.access(receipt.encoded));
+  const conflicting=await renderArtwork({source:source('greeting-card.html'),destination:out,output:initial.output,
+    autopilot:{...autopilotDefaults,preset:'4K'},writeManifest:false,metadata:{overrides:{title:'Another edition'}}});
+  assert.notEqual(conflicting.output,initial.output);
+  assert.equal((await readEmbeddedMetadata(initial.output)).title,'賀正 2027');
+  assert.equal((await readEmbeddedMetadata(conflicting.output)).title,'Another edition');
+  assert.equal((await fs.readdir(out)).length,2);
+  return {output:verified.output,sha256:verified.validation.hash,collision:conflicting.output};
+});
+
 if (failed) process.exitCode=1;

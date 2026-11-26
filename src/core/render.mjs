@@ -466,7 +466,7 @@ export async function renderArtwork(options) {
     check();
     const receipt = {encoded,output,settings:s,metadataOptions,extracted,runtime,source:project.file,gpu:gpu || {},
       requested,actual:{width:captured.width,height:captured.height},
-      detected,backend,strategy,recovered,warnings,logs,started,workspace:scratch,writeManifest:options.writeManifest};
+      detected,backend,strategy,recovered,warnings,logs,started,workspace:scratch,autopilot:!!options.autopilot,writeManifest:options.writeManifest};
     await options.onCheckpoint?.(receipt);
     committed = true;
     return await retryEncodedMetadata({...options,recovery:receipt,initial:true});

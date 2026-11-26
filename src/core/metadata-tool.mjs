@@ -39,8 +39,9 @@ export async function readEmbeddedMetadata(file, {signal} = {}) {
   // parsed number to text alone cannot recover the original lexical form.
   const {stdout} = await runExiftool(['-json', '-api', 'StructFormat=JSONQ', '-G1', '-s', '-n',
     ...[...textTags, ratingTag].map(tag => '-' + tag), path.resolve(file)], {signal});
-  const tags = JSON.parse(stdout)[0];
-  if (!tags || tags.Error) throw new Error(tags?.Error || 'ExifTool returned no image tags');
+  const record = JSON.parse(stdout)[0];
+  if (!record || record.Error) throw new Error(record?.Error || 'ExifTool returned no image tags');
+  const {SourceFile: _sourceFile, ...tags} = record;
   for (const tag of textTags) {
     const value = tags[tag];
     if (value === undefined) continue;
