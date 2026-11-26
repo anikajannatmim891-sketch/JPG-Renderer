@@ -129,6 +129,22 @@ try{
  assert.equal(reviewed.status,'completed',reviewed.error);
  assert(reviewed.result.recovered);
  assert.deepEqual((await readEmbeddedMetadata(reviewed.result.output)).keywords,['gradient','007','2027']);
+ if (executablePath) {
+  const babylon=path.join(external,'artwork source','graphics','babylon.ts');
+  await app.evaluate(({dialog},file)=>{dialog.showOpenDialog=async()=>({canceled:false,filePaths:[file]});},babylon);
+  await page.getByRole('button',{name:'Add Files',exact:true}).click();
+  await page.getByRole('button',{name:'Start Autopilot',exact:false}).click();
+  const id=await page.evaluate(async()=> (await window.studio.call('state')).jobs.find(j=>j.input.source.endsWith('babylon.ts'))?.id);
+  const sculpture=await waitJob(id,180000);
+  assert.equal(sculpture.status,'completed',sculpture.error);
+  assert.match(sculpture.result.backend,/Babylon/);
+  assert.equal(sculpture.result.actual.width,4096);
+  const tags=await readEmbeddedMetadata(sculpture.result.output);
+  assert.equal(tags.keywords[3],'2027');
+  assert(tags.keywords.includes('001'));
+  await fs.copyFile(sculpture.result.output,path.join(evidence,path.basename(sculpture.result.output)));
+  console.log('PASS installed Babylon.js native 4K PBR export with verified metadata');
+ }
  await page.locator('.autopilot').evaluate(el=>el.scrollTop=0);
  await page.screenshot({path:path.join(evidence,'autopilot.png')});
  await fs.copyFile(batch.result.output,path.join(evidence,path.basename(batch.result.output)));

@@ -9,5 +9,5 @@ if(!installer)throw new Error('NSIS installer missing');
 const installDir=path.join(os.tmpdir(),'uvrs-installed-'+Date.now());
 execFileSync(path.join(release,installer),['/S',`/D=${installDir}`],{stdio:'inherit',timeout:120000});
 const exe=path.join(installDir,'Universal Visual Render Studio.exe');await fs.access(exe);
-execFileSync(process.execPath,['scripts/ui-smoke.mjs'],{stdio:'inherit',env:{...process.env,UVRS_APP_EXECUTABLE:exe},timeout:420000});
+execFileSync(process.execPath,['scripts/ui-smoke.mjs'],{stdio:'inherit',env:{...process.env,UVRS_APP_EXECUTABLE:exe},timeout:600000});
 console.log('Installed NSIS application rendered real artwork:',exe);

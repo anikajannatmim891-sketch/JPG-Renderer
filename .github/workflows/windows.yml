@@ -36,6 +36,7 @@ jobs:
       - run: npm run test:render
       - run: npm run test:metadata
       - run: npm run test:autopilot
+      - run: npm run test:graphics
       - run: npm run package:win
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
@@ -94,9 +95,34 @@ jobs:
           name: Windows-200-artwork-batch-evidence
           path: test-output/autopilot/**/acceptance.json
           if-no-files-found: warn
+  graphics-webgpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/vendor/chromium
+      UVRS_SOFTWARE_TEST: '1'
+      UVRS_WEBGPU_TEST: '1'
+      UVRS_WEBGPU_CANVAS_TEST: '1'
+      UVRS_GRAPHICS_FILTER: 'WebGPU|TSL'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22.21.0'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install-deps chromium
+      - run: npm run browser:install
+      - run: npm run test:graphics
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: WebGPU-rendering-evidence
+          path: test-output/graphics/**/*
+          if-no-files-found: warn
   publish:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish }}
-    needs: [windows, production-batch]
+    needs: [windows, production-batch, graphics-webgpu]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -114,4 +140,4 @@ jobs:
           sha256sum --check "$installer.sha256"
           gh release create "v$UVRS_VERSION" "$installer" "$installer.sha256" \
             --target "$GITHUB_SHA" --title "Universal Visual Render Studio $UVRS_VERSION" \
-            --notes "Windows x64 NSIS installer. Passed installed-app, native rendering, ExifTool readback and 200-entry batch acceptance. CI used software WebGL. Commit $GITHUB_SHA."
+            --notes "Windows x64 NSIS installer. Passed installed-app, native rendering, ExifTool readback and 200-entry batch acceptance. CI used software WebGL and WebGPU. Commit $GITHUB_SHA."

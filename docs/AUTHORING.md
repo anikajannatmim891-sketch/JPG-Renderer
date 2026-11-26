@@ -118,3 +118,114 @@ screen-space effects across tile boundaries before enabling tiles.
 
 The optional manifest `metadata` object accepts the same title, description, ordered keywords,
 and rating as `uvrs-metadata`. It sits below runtime metadata and above standard HTML tags.
+
+## Graphics contract version 2
+
+Version 1 projects still run. Use version 2 for asynchronous GPU setup, advanced
+tiles, worker-backed canvases, or progressive rendering. Static HTML and SVG
+can omit the contract when their layout is unambiguous and all assets load
+locally. Use intrinsic SVG dimensions or a viewBox, or set a fixed artwork
+container. Keep complex DOM and canvas layers within the same logical design.
+
+```js
+window.renderStudio = {
+  version: 2,
+  engine: 'WebGPU / WGSL',
+  design: { width: 2400, height: 1000 },
+  async ready() {
+    // Load models, await textures, compile shaders, and create the GPU device.
+  },
+  async render({ width, height, cssWidth, cssHeight, pixelRatio, seed, time, tile }) {
+    // Keep the design and camera at their authored dimensions and aspect.
+    // Size the physical backing store to tile?.width ?? width and tile?.height ?? height.
+    // Draw the selected deterministic frame.
+  },
+  async flush() {
+    // Await any artwork-owned workers or device queues before capture.
+  },
+  dispose() {
+    // Release devices, workers, textures, render targets and listeners.
+  },
+};
+```
+
+Keep `width` and `height` as physical full-frame dimensions even when rendering a
+tile. Use `cssWidth`, `cssHeight`, and `pixelRatio` for logical layout. For a
+Canvas 2D contract, scale the context or use an authored pixel-coordinate
+pipeline exactly once. For WebGL2, initialize the canvas at the native
+resolution before drawing and use the actual drawing-buffer dimensions to
+validate your viewport. Uniform locations can be null when compiled away.
+Worker-backed OffscreenCanvas artwork must resolve `render()` or `flush()` only
+after the worker has drawn the requested native frame.
+
+### Local libraries and assets
+
+Use the pinned browser libraries shipped with Studio:
+
+| Import | Pinned version |
+| --- | --- |
+| `three`, `three/addons/*`, `three/webgpu`, `three/tsl` | 0.180.0 |
+| `@babylonjs/core`, `@babylonjs/loaders` | 9.38.0 |
+| `react`, `react-dom`, `@react-three/fiber` | 19.2.0, 19.2.0, 9.8.2 |
+| `three-gpu-pathtracer`, `three-mesh-bvh` | 0.0.24, 0.9.2 |
+
+Use a JS, TS or TSX manifest entry for bundled imports and React Three Fiber.
+An HTML module can import bare `three`, its addons and WebGPU modules, Babylon
+core and loaders, or the Three.js path tracer. Studio resolves exact
+Three.js 0.180.0 jsDelivr and unpkg module URLs to the corresponding bundled
+files. Other versions must be supplied with the project. Studio resolves
+imports at runtime and does not rewrite files on disk.
+
+Use relative URLs for shaders, models, HDR environments, images, and fonts.
+Declare essential project-relative files in `render-studio.json` under
+`requiredAssets`. Addon modules include Three.js GLTF, OBJ, texture, KTX2, and
+Draco loaders. Point decoder paths at assets under the project or, in HTML
+modules, use `new URL('../libs/draco/', import.meta.resolve('three/addons/loaders/DRACOLoader.js')).href`
+for the bundled Draco decoder directory. Use native WGSL for Babylon WebGPU. When compiling
+GLSL with Babylon WebGPU, provide the compatible local glslang and Tint
+converters using Babylon's engine options. Studio blocks unsolicited CDN
+requests and executes no package scripts.
+
+### Tiles and progressive frames
+
+Enable `capabilities: {tiles:true, tilePadding:6, tileSize:480}` only after
+comparing tiled and direct output. Padding and tile size are CSS pixels.
+`tile.x` and `tile.y` begin at the top left of the full image. Convert Y for
+WebGL fragment coordinates. WGSL fragment positions already use top-left
+coordinates. Keep global coordinates, the camera and exposure fixed across
+tiles.
+
+For Three.js, expose `threeCamera` and set
+`capabilities.threeViewOffset = true` for compatible scenes. For Babylon.js
+or a custom camera, use `beginTile(args)` to apply the tile window to the
+authored full projection and `endTile(args)` to restore it. The
+[verified Babylon fixture](../tests/fixtures/graphics/babylon.ts) shows the
+clip-space matrix for a standard left-handed perspective camera. Preserve the
+technique appropriate to an authored orthographic, reversed-depth, or
+custom projection. Keep full-image state for shadow maps, tone mapping, and
+post-processing. Leave tiling disabled if an effect depends on pixels
+outside the verified padding.
+
+Declare `progressive: {minSamples:64, maxSamples:128, requireConvergence:true}`
+and a `sample(args)` function for path tracing. `render(args)` initializes
+the native scene and resets the accumulation for that output or tile.
+`sample({samples,sampleLimit,...args})` must resolve to
+`{samples: completedCount, converged: boolean}` after real work. Wait inside
+the hook for asynchronous compilation and complete samples. Report completed
+accumulation rather than render loop ticks. The exporter captures once the
+minimum is met and, when requested, convergence is reported. If the
+declared requirement exceeds the user's sample or execution budget, Studio
+keeps the job in Needs Attention. It never emits the preview or lowers
+samples to force completion. See the [tested path-tracer fixture](../tests/fixtures/graphics/pathtrace.ts).
+
+### Verification boundaries
+
+Studio checks submitted WebGPU work, actual device limits, surface size, device
+loss, and validation errors. Some Chromium/driver combinations can run compute
+and texture rendering but cannot present a WebGPU canvas. A project can author
+an exact native texture-to-canvas readback, as in the
+[WGSL readback fixture](../tests/fixtures/graphics/webgpu-texture.html).
+Worker-side GPU devices remain dependent on authored readiness and presentation
+contracts. Hardware-only mode rejects unverified worker GPU paths. Preserve
+the authored lighting, physical materials, procedural seeds, and color
+management in every rendering path.
