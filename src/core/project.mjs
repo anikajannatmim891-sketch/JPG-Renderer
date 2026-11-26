@@ -39,6 +39,7 @@ export async function serveProject(project, {offline=false}={}) {
   const server = http.createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('Cache-Control','no-store');
+    if (offline) res.setHeader('X-DNS-Prefetch-Control','off');
     if (offline) res.setHeader('Content-Security-Policy', [
       "default-src 'self' data: blob:", "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:",
       "style-src 'self' 'unsafe-inline'", "connect-src 'self'", "object-src 'none'",

@@ -1,6 +1,9 @@
 import {close, filenameHints} from './dimensions.mjs';
 
-export function installCanvasTracking({fixed2D, shaderTile} = {}) {
+export function installCanvasTracking({fixed2D, shaderTile, offline} = {}) {
+  if (offline) for (const name of ['RTCPeerConnection','webkitRTCPeerConnection']) {
+    Object.defineProperty(globalThis,name,{value:undefined});
+  }
   const records = new Map();
   const attributes = ['width', 'height'];
   const glMethods = {
@@ -113,15 +116,27 @@ export function installCanvasTracking({fixed2D, shaderTile} = {}) {
         for (const method of ['getImageData','putImageData','resetTransform','setTransform','reset','drawImage','createPattern','isPointInPath','isPointInStroke']) {
           if (context[method]) context[method] = () => { throw new Error('Fixed Canvas 2D adapter cannot safely translate ' + method); };
         }
-        const setStyle = (name, accept) => {
-          const prop = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, name);
-          if (prop?.set) Object.defineProperty(context, name, {get:()=>prop.get.call(context), set:value=>{
-            if (!accept(value)) throw new Error('Fixed Canvas 2D adapter cannot safely translate ' + name);
-            prop.set.call(context, value);
-          }});
-        };
-        setStyle('filter', value => value === 'none');
-        for (const name of ['shadowBlur','shadowOffsetX','shadowOffsetY']) setStyle(name, value => Number(value) === 0);
+        for (const name of ['shadowBlur','shadowOffsetX','shadowOffsetY']) {
+          const property = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype,name);
+          Object.defineProperty(context,name,{
+            get:()=>property.get.call(context) / fixed2D.ratio,
+            set:value=>property.set.call(context,Number(value) * fixed2D.ratio),
+          });
+        }
+        const filter = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype,'filter');
+        if (filter) {
+          const lengths = /(-?(?:\d+\.?\d*|\.\d+))px\b/gi;
+          const scaled = (value,multiplier) => value.replace(lengths,(_match,n)=>Number(n)*multiplier + 'px');
+          Object.defineProperty(context,'filter',{
+            get:()=>scaled(filter.get.call(context),1/fixed2D.ratio),
+            set:value=>{
+              const text = String(value);
+              if (/\b(?:url|calc|var)\(/i.test(text) || /\d(?:em|rem|vw|vh|cm|mm|in|pt|pc)\b/i.test(text))
+                throw new Error('Fixed Canvas 2D adapter cannot safely translate this filter');
+              filter.set.call(context,scaled(text,fixed2D.ratio));
+            },
+          });
+        }
       }
     }
     return context;

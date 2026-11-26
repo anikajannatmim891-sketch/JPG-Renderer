@@ -25,5 +25,14 @@ for (let i=0;i<40;i++) {
   g.ellipse(x,CH * (i%12)/12,65+i*5,38+i*3,i*Math.PI/18,0,Math.PI*2);
   g.stroke();
 }
+g.save();
+g.shadowColor='#201027';
+g.shadowBlur=8;
+g.shadowOffsetX=10;
+g.shadowOffsetY=5;
 g.font='80px serif';g.fillStyle='#fff0c5';g.fillText('Open arcs', CW*.08, CH*.74);
+g.restore();
+g.filter='blur(4px)';
+g.fillStyle='#ffc28a';
+g.fillRect(CW*.73,CH*.71,CW*.13,CH*.06);
 </script>

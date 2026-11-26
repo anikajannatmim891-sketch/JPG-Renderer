@@ -42,7 +42,7 @@ async function openArtwork(browser, server, s, viewport, adapters) {
     deviceScaleFactor:viewport.ratio,acceptDownloads:false,serviceWorkers:'block'});
   const failures = [];
   try {
-    await context.addInitScript(installCanvasTracking, adapters);
+    await context.addInitScript(installCanvasTracking,{...adapters,offline:!s.allowedOrigins.length});
     await context.route('**/*',async route => {
       const u = new URL(route.request().url());
       const local = u.origin === server.origin && u.pathname.startsWith(new URL(server.base).pathname);
@@ -266,7 +266,7 @@ export async function renderArtwork(options) {
     report('analyzing','Starting isolated Chromium');
     browser = await chromium.launch({channel:'chromium',headless:true,chromiumSandbox:true,
       executablePath:process.env.UVRS_CHROMIUM || undefined,
-      args:['--force-webrtc-ip-handling-policy=disable_non_proxied_udp',
+      args:['--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--dns-prefetch-disable',
         ...(process.env.UVRS_SOFTWARE_TEST === '1' ? ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] : [])]});
     check();
     const selector = project.manifest.selector;
