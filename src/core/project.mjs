@@ -2,10 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { build } from 'esbuild';
+import {bundleGraphics,graphicsAsset,inside,privatePath,runtimeHtml} from './graphics-dependencies.mjs';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-const mime = {'.html':'text/html','.htm':'text/html','.svg':'image/svg+xml','.css':'text/css','.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.woff':'font/woff','.woff2':'font/woff2','.ttf':'font/ttf','.glsl':'text/plain','.hdr':'application/octet-stream','.avif':'image/avif','.gif':'image/gif','.otf':'font/otf','.bmp':'image/bmp','.bin':'application/octet-stream','.gltf':'model/gltf+json','.glb':'model/gltf-binary'};
+const mime = {'.html':'text/html','.htm':'text/html','.svg':'image/svg+xml','.css':'text/css','.js':'text/javascript','.mjs':'text/javascript','.json':'application/json','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.woff':'font/woff','.woff2':'font/woff2','.ttf':'font/ttf','.glsl':'text/plain','.wgsl':'text/plain','.vert':'text/plain','.frag':'text/plain','.obj':'text/plain','.mtl':'text/plain','.wasm':'application/wasm','.ktx2':'image/ktx2','.dds':'application/octet-stream','.webm':'video/webm','.mp4':'video/mp4','.hdr':'application/octet-stream','.avif':'image/avif','.gif':'image/gif','.otf':'font/otf','.bmp':'image/bmp','.bin':'application/octet-stream','.gltf':'model/gltf+json','.glb':'model/gltf-binary'};
 export async function contained(root, relative) {
   const base = await fs.realpath(root);
   const file = await fs.realpath(path.resolve(base, relative));
@@ -29,13 +29,10 @@ export async function inspectProject(selected) {
 }
 export async function serveProject(project, {offline=false}={}) {
   const token = crypto.randomBytes(24).toString('hex');
-  let bundle;
-  if (['js','mjs','ts','jsx','tsx'].includes(project.kind)) {
-    const dependencies=await fs.realpath(process.env.UVRS_BROWSER_DEPENDENCIES||path.resolve(path.dirname(require.resolve('three')), '../..'));
-    const inside=(base,file)=>{const relative=path.relative(base,file);return relative===''||(relative!=='..'&&!relative.startsWith('..'+path.sep)&&!path.isAbsolute(relative));};
-    const result = await build({plugins:[{name:'project-boundary',setup(builder){builder.onLoad({filter:/.*/},async args=>{const real=await fs.realpath(args.path);if(!inside(project.root,real)&&!inside(dependencies,real))throw new Error('Bundled import escapes selected project: '+path.basename(real));return undefined;});}}],entryPoints:[project.file],bundle:true,write:false,platform:'browser',format:'esm',jsx:'automatic',nodePaths:[dependencies],logLevel:'silent',loader:{'.glsl':'text','.vert':'text','.frag':'text'}});
-    bundle=result.outputFiles[0].contents;
-  }
+  const packages = await fs.realpath(process.env.UVRS_BROWSER_DEPENDENCIES || path.resolve(path.dirname(require.resolve('three')),'../..'));
+  const bundled = new Map();
+  const bundle = ['js','mjs','ts','jsx','tsx'].includes(project.kind)
+    ? await bundleGraphics({entry:project.file,root:project.root,packages}) : null;
   const server = http.createServer(async(req,res)=>{
     res.setHeader('X-Content-Type-Options','nosniff');
     res.setHeader('Cache-Control','no-store');
@@ -49,16 +46,26 @@ export async function serveProject(project, {offline=false}={}) {
       const url = new URL(req.url,'http://localhost');
       if (!url.pathname.startsWith('/'+token+'/') || !['GET','HEAD'].includes(req.method)) {res.writeHead(403).end();return;}
       const rel = decodeURIComponent(url.pathname.slice(token.length+2));
+      if (rel==='__uvrs_probe') {res.setHeader('Content-Type','text/html');res.end('<!doctype html><title>GPU probe</title>');return;}
       if (bundle && rel==='__studio_entry.html') {res.setHeader('Content-Type','text/html');res.end('<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0"><div id="root"></div><script type="module" src="__studio_bundle.js"></script></body></html>');return;}
       if (bundle && rel==='__studio_bundle.js') {res.setHeader('Content-Type','text/javascript');res.end(bundle);return;}
-      const file = await contained(project.root,rel);
-      const relative = path.relative(project.root,file);
-      if(relative.split(path.sep).some(part=>part.startsWith('.') || /^(?:credentials?|secrets?|service[-_]?account)(?:[._-]|$)/i.test(part)) || !Object.hasOwn(mime,path.extname(file).toLowerCase()))
+      const graphics = graphicsAsset(rel,packages);
+      if (graphics?.library) {
+        const library = graphics.library;
+        if (!bundled.has(library)) bundled.set(library,bundleGraphics({library,root:project.root,packages}));
+        res.setHeader('Content-Type','text/javascript');
+        res.end(await bundled.get(library));return;
+      }
+      const file = graphics?.file ? await fs.realpath(graphics.file) : await contained(project.root,rel);
+      const relative = path.relative(graphics?.file ? packages : project.root,file);
+      const ext = path.extname(file).toLowerCase();
+      if (!inside(graphics?.file ? packages : project.root,file) || privatePath(relative) || !Object.hasOwn(mime,ext))
         throw new Error('File is not a supported project asset');
       const stat = await fs.stat(file);
       if(!stat.isFile() || stat.size>150_000_000) throw new Error('Not a file');
       res.setHeader('Content-Type',(mime[path.extname(file).toLowerCase()]||'application/octet-stream')+'; charset=utf-8');
-      res.end(await fs.readFile(file));
+      const data = await fs.readFile(file);
+      res.end(['.html','.htm'].includes(ext) ? runtimeHtml(data.toString('utf8'),base) : data);
     } catch {res.writeHead(404).end('Asset unavailable');}
   });
   await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(0,'127.0.0.1',resolve);});

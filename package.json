@@ -19,9 +19,13 @@
     "electron:install": "node node_modules/electron/install.js",
     "test:metadata": "node tests/metadata-acceptance.mjs",
     "resources:prepare": "node scripts/resources.mjs",
-    "test:autopilot": "node tests/autopilot-acceptance.mjs"
+    "test:autopilot": "node tests/autopilot-acceptance.mjs",
+    "test:graphics": "node tests/graphics-acceptance.mjs"
   },
   "dependencies": {
+    "@babylonjs/core": "9.38.0",
+    "@babylonjs/loaders": "9.38.0",
+    "@react-three/fiber": "9.4.0",
     "@resvg/resvg-js": "2.6.2",
     "esbuild": "0.25.11",
     "parse5": "8.1.0",
@@ -30,7 +34,10 @@
     "react-dom": "19.2.0",
     "sharp": "0.35.5",
     "svgo": "4.1.0",
-    "three": "0.180.0"
+    "three": "0.180.0",
+    "three-gpu-pathtracer": "0.0.24",
+    "three-mesh-bvh": "0.9.2",
+    "xatlas-web": "0.1.0"
   },
   "devDependencies": {
     "@types/node": "24.10.0",
@@ -51,7 +58,8 @@
       "dist/**/*",
       "package.json",
       "!node_modules/exiftool-vendored.exe/**/*",
-      "!node_modules/exiftool-vendored.pl/**/*"
+      "!node_modules/exiftool-vendored.pl/**/*",
+      "!node_modules/@babylonjs/**/*.{map,ts}"
     ],
     "asarUnpack": [
       "node_modules/sharp/**/*",
@@ -62,7 +70,25 @@
       "node_modules/three/**/*",
       "node_modules/react/**/*",
       "node_modules/react-dom/**/*",
-      "node_modules/scheduler/**/*"
+      "node_modules/scheduler/**/*",
+      "node_modules/@babylonjs/**/*",
+      "node_modules/@react-three/**/*",
+      "node_modules/@babel/runtime/**/*",
+      "node_modules/three-gpu-pathtracer/**/*",
+      "node_modules/three-mesh-bvh/**/*",
+      "node_modules/xatlas-web/**/*",
+      "node_modules/react-reconciler/**/*",
+      "node_modules/its-fine/**/*",
+      "node_modules/zustand/**/*",
+      "node_modules/suspend-react/**/*",
+      "node_modules/use-sync-external-store/**/*",
+      "node_modules/react-use-measure/**/*",
+      "node_modules/maath/**/*",
+      "node_modules/tunnel-rat/**/*",
+      "node_modules/base64-js/**/*",
+      "node_modules/buffer/**/*",
+      "node_modules/ieee754/**/*",
+      "node_modules/fflate/**/*"
     ],
     "extraResources": [
       {
