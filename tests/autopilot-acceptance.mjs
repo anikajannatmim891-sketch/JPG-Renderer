@@ -64,7 +64,7 @@ await run('2400 × 1000 legacy fixed-coordinate Canvas 2D at 8K and 10K',async()
     assert.equal(r.detected.width,2400);
     assert.equal(r.detected.height,1000);
     assert.match(r.detected.notes.join(' '),/over filename hint/);
-    assert.equal(r.strategy,'fixed Canvas 2D');
+    assert.equal(r.strategy,preset==='10K' ? 'tiled fixed Canvas 2D' : 'fixed Canvas 2D');
     assert(r.recovered);
   }
 });
@@ -193,6 +193,14 @@ await run('200-entry SQLite batch, deduplication, pause, restart, and clean outp
     await queue.control('remove',completedJob.id);
     await fs.access(completedJob.result.output);
     if (process.env.UVRS_FULL_BATCH) {
+      let milestone = 0;
+      queue.onChange = jobs => {
+        const completedCount = jobs.filter(job=>job.status==='completed').length + 1;
+        if (Math.floor(completedCount/25)>milestone) {
+          milestone = Math.floor(completedCount/25);
+          console.log('  batch verified',completedCount,'of 199');
+        }
+      };
       await queue.control('resume');
       await idle(queue);
       const errors = queue.jobs.slice(1).filter(j=>j.status!=='completed');

@@ -271,7 +271,7 @@ export async function renderArtwork(options) {
     check();
     const selector = project.manifest.selector;
     const measure = page => page.evaluate(measureLayout,selector);
-    let detected, diagnostic, baseline, shader, gpu, runtime;
+    let detected, diagnostic, baseline, shader, gpu, runtime, singleCanvas;
     if (options.autopilot) {
       const hint = projectHint(project);
       const probe = {cssWidth:hint?.width || 1200,cssHeight:hint?.height || 900,ratio:1};
@@ -314,17 +314,15 @@ export async function renderArtwork(options) {
         baseline = await measure(worker.page);
         assertLayout(baseline,viewport,project);
         worker.ensureLoaded();
-        const interactive = await worker.page.evaluate(()=>document.querySelector('canvas') !== null);
-        if (interactive) {
+        if (baseline.canvases.some(c=>c.webgl)) {
           gpu = await gpuProbe(worker.page);
-          gpu.estimatedFrameBytes = s.width * s.height * (baseline.canvases.some(c=>c.webgl) ? 24 : 12);
+          gpu.estimatedFrameBytes = s.width * s.height * 24;
         }
         const [canvas] = baseline.canvases;
-        shader = legacyShader(baseline);
-        if (shader && (!canvas || !close(canvas.x,0) || !close(canvas.y,0) ||
-          !close(canvas.cssWidth,viewport.cssWidth) || !close(canvas.cssHeight,viewport.cssHeight) ||
-          await worker.page.evaluate(()=>document.body.children.length &&
-            [...document.body.children].some(e=>!['CANVAS','SCRIPT','STYLE'].includes(e.tagName))))) shader = null;
+        singleCanvas = baseline.canvases.length === 1 && close(canvas.x,0) && close(canvas.y,0) &&
+          close(canvas.cssWidth,viewport.cssWidth) && close(canvas.cssHeight,viewport.cssHeight) &&
+          await worker.page.evaluate(()=>[...document.body.children].every(e=>['CANVAS','SCRIPT','STYLE'].includes(e.tagName)));
+        if (singleCanvas) shader = legacyShader(baseline);
         diagnostic = await worker.page.screenshot({type:'png',omitBackground:true,timeout:s.timeout});
         runtime = await readRuntime(worker.page);
       } finally {await worker.context.close();}
@@ -335,16 +333,16 @@ export async function renderArtwork(options) {
     const captureDirect = async fixed2D => {
       const worker = await prepare(viewport,{fixed2D});
       try {
-        gpu ??= await gpuProbe(worker.page);
         const layout = worker.layout;
         const webgl = Boolean(baseline?.canvases.some(c=>c.webgl) || layout.canvases.some(c=>c.webgl));
+        if (webgl || !options.autopilot) gpu ??= await gpuProbe(worker.page);
         if (options.autopilot && webgl && (Math.max(s.width,s.height) > Math.min(gpu.maxRenderbufferSize || Infinity,gpu.maxTextureSize || Infinity)
             || s.width > (gpu.maxViewport?.[0] || Infinity) || s.height > (gpu.maxViewport?.[1] || Infinity)))
           throw new Error('Full-frame WebGL dimensions exceed the probed rendering limits');
         await frame(worker.page,layout.contract,args(s.width,s.height,viewport.ratio));
         const rendered = await measure(worker.page);
         if (options.autopilot) assertLayout(rendered,viewport,project);
-        assertCanvases(rendered.canvases,s,viewport.ratio,gpu);
+        assertCanvases(rendered.canvases,s,viewport.ratio,gpu || {});
         worker.ensureLoaded();
         runtime = await readRuntime(worker.page);
         if (selector) {
@@ -361,13 +359,13 @@ export async function renderArtwork(options) {
       try {
         const {contract} = worker.layout;
         if (!contract.tiles) throw new Error('Tiling requires verified renderStudio.capabilities.tiles or a compatible fullscreen shader');
-        gpu ??= await gpuProbe(worker.page);
+        if (baseline?.canvases.some(c=>c.webgl) || !options.autopilot) gpu ??= await gpuProbe(worker.page);
         const out = await captureTiles(s,tilePlan(s,viewport,baseline?.canvases.some(c=>c.webgl) || !options.autopilot ? gpu : {},contract),async tile=>{
           check();
           await worker.page.setViewportSize({width:Math.round(tile.width / viewport.ratio),height:Math.round(tile.height / viewport.ratio)});
           await frame(worker.page,contract,args(s.width,s.height,viewport.ratio,tile));
           const rendered = await measure(worker.page);
-          assertCanvases(rendered.canvases,s,viewport.ratio,gpu);
+          assertCanvases(rendered.canvases,s,viewport.ratio,gpu || {});
           worker.ensureLoaded();
           return worker.page.screenshot({type:'png',omitBackground:s.transparent,timeout:s.timeout});
         },report);
@@ -404,17 +402,43 @@ export async function renderArtwork(options) {
       },report);
     };
 
+    const compareDiagnostic = async (probe,adapter) => {
+      const [actual,original] = await Promise.all([pixels(probe),pixels(diagnostic)]);
+      if (actual.reduce((total,value,i)=>total+Math.abs(value-original[i]),0)/actual.length > 5)
+        throw new Error(adapter + ' did not match the original diagnostic composition');
+    };
+    const captureFixedTiles = async (target,ratio,step) => {
+      // Expand every tile before drawing so its effects sample the same pixels
+      // as a full-frame backing store. Keep the element's logical box intact.
+      return captureTiles(target,{step,overlap:1024},async tile=>{
+        check();
+        const fixed2D = {width:viewport.cssWidth,height:viewport.cssHeight,ratio,tile};
+        const worker = await prepare({...viewport,ratio},{fixed2D});
+        try {
+          const [canvas] = (await measure(worker.page)).canvases;
+          if (canvas?.adapted !== '2d' || canvas.width !== tile.width || canvas.height !== tile.height)
+            throw new Error('Fixed Canvas 2D did not initialize the verified tile backing store');
+          worker.ensureLoaded();
+          const image = await worker.page.evaluate(()=>document.querySelector('canvas').toDataURL().split(',')[1]);
+          return Buffer.from(image,'base64');
+        } finally {await worker.context.close();}
+      },report);
+    };
     const strategies = s.strategy === 'tiled' ? [['tiled contract',captureContractTiles]] : [['direct',captureDirect]];
     if (s.strategy === 'auto') {
       if (baseline?.fixed2DPattern && !baseline.contract.exists && baseline.canvases.length === 1 &&
-          baseline.canvases[0].type === '2d')
+          baseline.canvases[0].type === '2d') {
+        if (singleCanvas && s.width * s.height > 33e6) strategies.push(['tiled fixed Canvas 2D',async()=>{
+          const probe = await captureFixedTiles({width:viewport.cssWidth,height:viewport.cssHeight},1,896);
+          await compareDiagnostic(probe,'Canvas 2D tiles');
+          return captureFixedTiles(s,viewport.ratio,2400);
+        }]);
         strategies.push(['fixed Canvas 2D',()=>captureDirect({width:viewport.cssWidth,height:viewport.cssHeight,ratio:viewport.ratio})]);
+      }
       if (baseline?.contract.tiles) strategies.push(['tiled contract',captureContractTiles]);
       if (shader) strategies.push(['tiled fullscreen WebGL',async()=>{
         const probe = await captureShaderTiles({width:viewport.cssWidth,height:viewport.cssHeight},1,768);
-        const [a,b] = await Promise.all([pixels(probe),pixels(diagnostic)]);
-        if (a.reduce((total,v,i)=>total+Math.abs(v-b[i]),0)/a.length > 5)
-          throw new Error('Shader adapter did not match the original diagnostic composition');
+        await compareDiagnostic(probe,'Shader tiles');
         return captureShaderTiles(s,viewport.ratio);
       }]);
     }

@@ -71,10 +71,13 @@ export function installCanvasTracking({fixed2D, shaderTile, offline} = {}) {
   const nativeRect = Element.prototype.getBoundingClientRect;
   function resize(canvas, record) {
     for (const key of attributes) {
-      const size = record.mode === 'shader' ? shaderTile[key] : Math.round(record[key] * fixed2D.ratio);
+      const size = record.mode === 'shader' ? shaderTile[key] : fixed2D.tile?.[key] ?? Math.round(record[key] * fixed2D.ratio);
       if (dimensions[key].get.call(canvas) !== size) dimensions[key].set.call(canvas, size);
     }
-    if (record.mode === '2d' && record.context) CanvasRenderingContext2D.prototype.setTransform.call(record.context, fixed2D.ratio, 0, 0, fixed2D.ratio, 0, 0);
+    if (record.mode === '2d' && record.context) {
+      const tile = fixed2D.tile;
+      CanvasRenderingContext2D.prototype.setTransform.call(record.context,fixed2D.ratio,0,0,fixed2D.ratio,-(tile?.x || 0),-(tile?.y || 0));
+    }
   }
   if (fixed2D || shaderTile) {
     for (const key of attributes) Object.defineProperty(canvasPrototype, key, {
@@ -120,7 +123,12 @@ export function installCanvasTracking({fixed2D, shaderTile, offline} = {}) {
           const property = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype,name);
           Object.defineProperty(context,name,{
             get:()=>property.get.call(context) / fixed2D.ratio,
-            set:value=>property.set.call(context,Number(value) * fixed2D.ratio),
+            set:value=>{
+              const physical = Number(value) * fixed2D.ratio;
+              if (fixed2D.tile && Math.abs(physical) * (name === 'shadowBlur' ? 24 : 6) > fixed2D.tile.overlap)
+                throw new Error('Canvas 2D shadow exceeds the verified tile padding');
+              property.set.call(context,physical);
+            },
           });
         }
         const filter = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype,'filter');
@@ -131,6 +139,8 @@ export function installCanvasTracking({fixed2D, shaderTile, offline} = {}) {
             get:()=>scaled(filter.get.call(context),1/fixed2D.ratio),
             set:value=>{
               const text = String(value);
+              if (fixed2D.tile && [...text.matchAll(lengths)].reduce((sum,m)=>sum+Math.abs(Number(m[1])),0) * fixed2D.ratio * 8 > fixed2D.tile.overlap)
+                throw new Error('Canvas 2D filter exceeds the verified tile padding');
               if (/\b(?:url|calc|var)\(/i.test(text) || /\d(?:em|rem|vw|vh|cm|mm|in|pt|pc)\b/i.test(text))
                 throw new Error('Fixed Canvas 2D adapter cannot safely translate this filter');
               filter.set.call(context,scaled(text,fixed2D.ratio));

@@ -100,7 +100,8 @@ at its original logical dimensions. Autopilot can also adapt a single unscaled C
 fixed `CW` and `CH` property assignments, matching CSS dimensions, and logical drawing
 operations, including shadows and filters with pixel lengths. Backing-store reads, pixel writes,
 URL or layout-dependent filters, absolute transform resets, and canvas-to-canvas draws need
-native DPR handling or a render contract for that pattern.
+native DPR handling or a render contract for that pattern. Large standalone fixed-coordinate
+canvases use padded native tiles after a diagnostic comparison checks the composition.
 
 Autopilot can tile a single fullscreen WebGL pass that uses `gl_FragCoord` and an identifiable
 two-component resolution uniform. It checks the adapter against the original diagnostic image
