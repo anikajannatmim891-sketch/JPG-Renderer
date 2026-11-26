@@ -216,8 +216,8 @@ export class RenderQueue {
             delete job.recovery;
           }
         } else if (action === 'retry') {
-          if (!['failed','cancelled','review'].includes(job.status) || !job.input.destination) continue;
-          job.status = 'queued';
+          if ((!id && job.status !== 'failed') || !['failed','cancelled','review'].includes(job.status)) continue;
+          job.status = job.input.destination ? 'queued' : 'imported';
           job.attempts = 0;
           delete job.error;
         } else if (action === 'remove') {

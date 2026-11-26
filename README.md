@@ -7,7 +7,7 @@ Universal Visual Render Studio uses Electron, isolated Playwright Chromium, Shar
 1. Choose **Add Files**, drop artwork files, or choose **Add Folder**. Turn on **Include subfolders** for a recursive scan.
 2. Choose an **Output Folder**, a **Global Resolution Preset**, and an **Output Profile**. Autopilot remembers these settings.
 3. Choose **Start Autopilot**. The queue analyzes each artwork, captures its native pixels, encodes and embeds metadata, and reopens the export for verification.
-4. Select a row for its dimensions, strategy, and diagnostic. **Needs Attention** lists individual failures and metadata review. **Thumbnail** uses the completed JPEG. **Save Batch Report** exports one JSON summary.
+4. Select a row for its dimensions, strategy, and diagnostic. **Needs Attention** lists individual failures and lets you correct exceptional metadata on the retained image. **Thumbnail** uses the completed JPEG. **Save Batch Report** exports one JSON summary.
 
 Use **Pause All** to stop dispatch after active work finishes. You can pause or cancel an individual job and resume paused jobs. **Clear Completed** removes queue rows while keeping the JPEGs. SQLite persists progress and encoded checkpoints in the app’s data directory. Interrupted jobs resume when the app reopens unless the batch was paused.
 

@@ -67,6 +67,22 @@ if (singleInstance) app.whenReady().then(async()=>{
       throw new Error('Invalid Autopilot queue action');
     return queue.control(action,id);
   });
+  handle('batch-metadata',async(id,overrides)=>{
+    const job = queue.get(id);
+    const receipt = job.recovery;
+    if (job.status !== 'review' || !job.input.autopilotImport || !receipt) throw new Error('No retained artwork is awaiting metadata');
+    const current = resolveMetadata(receipt.extracted,receipt.runtime,receipt.metadataOptions);
+    if (overrides === undefined) return current;
+    if (!overrides || typeof overrides.title !== 'string' || typeof overrides.description !== 'string' ||
+      !Array.isArray(overrides.keywords) || !overrides.keywords.every(value=>typeof value==='string') ||
+      !Number.isInteger(overrides.rating)) throw new Error('Invalid metadata fields');
+    const metadata = {enabled:true,overrides:{title:overrides.title,description:overrides.description,
+      keywords:overrides.keywords,rating:overrides.rating}};
+    const validation = resolveMetadata(receipt.extracted,receipt.runtime,{...receipt.metadataOptions,...metadata});
+    if (!validation.complete) throw new Error(validation.errors.join(' · '));
+    await queue.retry(id,metadata);
+    return validation;
+  });
   handle('batch-thumbnail',async id=>{
     const job = queue.get(id);
     if (job.status !== 'completed' || !job.input.autopilotImport) throw new Error('Artwork has no completed image');

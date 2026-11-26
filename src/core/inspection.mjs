@@ -190,8 +190,13 @@ export function selectLayout(project, first, second) {
   const design = integerBox(first.contract.design, 'runtime contract');
   const fixed = (a,b,source) => sameBox(a,b) && integerBox(a,source);
   const artwork = fixed(first.target,second.target,'#artwork or manifest selector');
-  const canvas = first.canvases.length === 1 && second.canvases.length === 1
-    && fixed({width:first.canvases[0].cssWidth,height:first.canvases[0].cssHeight},
+  const [initialCanvas] = first.canvases;
+  // Canvas created by a deferred contract often still has the HTML default
+  // dimensions. That transient box says nothing about the native design.
+  const defaultCanvas = first.contract.render && initialCanvas?.cssWidth === 300 && initialCanvas?.cssHeight === 150 &&
+    initialCanvas?.width === 300 && initialCanvas?.height === 150;
+  const canvas = first.canvases.length === 1 && second.canvases.length === 1 && !defaultCanvas &&
+    fixed({width:initialCanvas.cssWidth,height:initialCanvas.cssHeight},
       {width:second.canvases[0].cssWidth,height:second.canvases[0].cssHeight},'canvas CSS layout');
   const constants = integerBox(first.constants,'inline CW and CH');
   const svg = (first.rootSVG || first.svg) && integerBox(first.intrinsicSVG,'SVG intrinsic dimensions');

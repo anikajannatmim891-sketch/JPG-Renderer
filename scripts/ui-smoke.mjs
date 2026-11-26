@@ -114,6 +114,7 @@ try{
  assert.equal((await readEmbeddedMetadata(batch.result.output)).keywords[5],'007');
  await page.getByRole('button',{name:'Thumbnail',exact:true}).click();
  await page.getByAltText('Thumbnail of completed JPEG').waitFor();
+ await page.locator('.autopilot').evaluate(el=>el.scrollTop=0);
  await page.screenshot({path:path.join(evidence,'autopilot.png')});
  await fs.copyFile(batch.result.output,path.join(evidence,path.basename(batch.result.output)));
  console.log('PASS Electron Autopilot: real portrait export, ordered numeric metadata and completed-image thumbnail');

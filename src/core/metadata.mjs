@@ -55,7 +55,7 @@ export function resolveMetadata(extracted,runtime,options={}){
     else{value[key]=key==='rating'?config.defaultRating:key==='keywords'?[]:'';sources[key]=key==='rating'?'default rating':'missing';}
   }
   const manualComplete=['title','description','keywords'].every(k=>own(config.overrides,k));
-  const warnings=[...(extracted.warnings||[]),...(manualComplete?(extracted.errors||[]).map(e=>'Source error overridden by manual metadata: '+e):[])],errors=manualComplete?[]:[...(extracted.errors||[])];if(runtimeError)errors.push(runtimeError);
+  const warnings=[...(extracted.warnings||[]),...(manualComplete?(extracted.errors||[]).map(e=>'Source error overridden by manual metadata: '+e):[])],errors=manualComplete?[]:[...(extracted.errors||[])];if(runtimeError)(manualComplete?warnings:errors).push(runtimeError);
   for(const k of ['title','description']){if(typeof value[k]!=='string'){errors.push(`${k} must be text`);value[k]='';}else if(sources[k]==='user edit')value[k]=value[k].trim();}
   if(typeof value.keywords==='string')value.keywords=value.keywords.split(',').map(k=>k.trim());
   if(!Array.isArray(value.keywords)||value.keywords.some(k=>typeof k!=='string')){errors.push('Keywords must be an array of strings or comma-separated text');value.keywords=[];}else if(sources.keywords==='user edit')value.keywords=value.keywords.map(k=>k.trim());

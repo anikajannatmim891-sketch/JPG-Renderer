@@ -32,6 +32,7 @@ export function Autopilot() {
   const [tab,setTab] = useState<'queue'|'attention'>('queue');
   const [page,setPage] = useState(0);
   const [activePreview,setActivePreview] = useState<{id:string;url:string}|null>(null);
+  const [metadataDraft,setMetadataDraft] = useState<{id:string;title:string;description:string;keywords:string;rating:number}|null>(null);
   const [selected,setSelected] = useState<string|null>(null);
 
   useEffect(()=>{
@@ -156,7 +157,7 @@ export function Autopilot() {
           <button disabled={!waiting.length||paused} onClick={()=>control('pause')}>Pause All</button>
           <button disabled={!paused&&!jobs.some(j=>j.status==='paused')} onClick={()=>control('resume')}>Resume All</button>
           <button disabled={!running.length&&!waiting.length&&!imported.length&&!jobs.some(j=>j.status==='paused')} onClick={()=>control('cancel')}>Cancel All</button>
-          <button disabled={!attention.length} onClick={()=>control('retry')}>Retry Failed</button>
+          <button disabled={!jobs.some(j=>j.status==='failed')} onClick={()=>control('retry')}>Retry Failed</button>
         </div>
       </div>
       {error&&<div className="production-feedback failure" role="alert">{error}</div>}
@@ -178,7 +179,14 @@ export function Autopilot() {
               {['queued','running'].includes(job.status)&&<button onClick={()=>control('pause',job.id)}>Pause</button>}
               {job.status==='paused'&&<button onClick={()=>control('resume',job.id)}>Resume</button>}
               {['queued','paused','running','imported'].includes(job.status)&&<button onClick={()=>control('cancel',job.id)}>Cancel</button>}
-              {(needsAttention(job)||job.status==='cancelled')&&<button onClick={()=>control('retry',job.id)}>Retry</button>}
+              {(job.status==='failed'||job.status==='cancelled')&&<button onClick={()=>control('retry',job.id)}>Retry</button>}
+              {job.status==='review'&&<button onClick={async()=>{
+                const current=await call('batch-metadata',job.id);
+                if (current) {
+                  setSelected(job.id);
+                  setMetadataDraft({id:job.id,...current.value,keywords:current.value.keywords.join('\n')});
+                }
+              }}>Review metadata</button>}
               {job.status==='completed'&&<><button onClick={async()=>{
                 const url=await call('batch-thumbnail',job.id);if(url){setSelected(job.id);setActivePreview({id:job.id,url});}
               }}>Thumbnail</button><button onClick={()=>void call('reveal',job.id)}>Show file</button></>}
@@ -190,10 +198,26 @@ export function Autopilot() {
       {detail&&<section className="production-detail" aria-label="Artwork details">
         {activePreview?.id===detail.id&&<img src={activePreview.url} alt="Thumbnail of completed JPEG"/>}
         <div><strong>{detail.input.source.split(/[\\/]/).at(-1)}</strong>
-          <p>{detail.error || last(detail)?.message || 'Ready for Autopilot'}</p>
+          <p>{detail.error || (detail.status==='completed' ? 'Metadata and output verified' : last(detail)?.message) || 'Ready for Autopilot'}</p>
           {detail.detected&&<p>Design size from {detail.detected.source}. {detail.detected.notes?.join(' ')}</p>}
           {detail.strategy&&<p>Capture strategy · {detail.strategy}</p>}
           {detail.result&&<p>{detail.result.output}</p>}
+          {detail.status==='review' && metadataDraft && metadataDraft.id===detail.id&&
+            <form className="production-review" onSubmit={async event=>{
+              event.preventDefault();
+              const result=await call('batch-metadata',detail.id,{...metadataDraft,keywords:metadataDraft.keywords.split('\n')});
+              if (result) {setMetadataDraft(null);setNotice('Metadata-only retry queued');}
+            }}>
+              <label>Title<input required value={metadataDraft.title}
+                onChange={e=>setMetadataDraft({...metadataDraft,title:e.target.value})}/></label>
+              <label>Description<textarea required value={metadataDraft.description}
+                onChange={e=>setMetadataDraft({...metadataDraft,description:e.target.value})}/></label>
+              <label>Keywords, one per line<textarea required value={metadataDraft.keywords}
+                onChange={e=>setMetadataDraft({...metadataDraft,keywords:e.target.value})}/></label>
+              <label>Rating<input required type="number" min="0" max="5" value={metadataDraft.rating}
+                onChange={e=>setMetadataDraft({...metadataDraft,rating:Number(e.target.value)})}/></label>
+              <button type="submit">Save and retry metadata</button>
+            </form>}
           {detail.status==='completed'&&<button onClick={()=>{control('remove',detail.id);setSelected(null);}}>Remove entry</button>}
         </div><button onClick={()=>setSelected(null)} aria-label="Close artwork details">×</button>
       </section>}

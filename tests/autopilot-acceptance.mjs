@@ -17,6 +17,7 @@ const source = name=>path.resolve('tests/fixtures',name);
 const verification = [];
 let failed = 0;
 async function run(name,execute) {
+  if (process.env.UVRS_AUTOPILOT_FILTER && !name.match(new RegExp(process.env.UVRS_AUTOPILOT_FILTER))) return;
   console.log('START',name);
   try {
     verification.push({name,status:'passed',evidence:await execute()});
@@ -115,6 +116,7 @@ await run('Black and partial high-DPR frames recover using the verified tile con
     await fs.writeFile(file,metadata+changed);
     const r = await render(file,'4K');
     assert.equal(r.strategy,'tiled contract');
+    assert.deepEqual(r.actual,{width:4096,height:2304});
     assert(r.recovered);
     assert(r.logs.some(log=>log.level==='fallback' && /entirely black|uniform region/.test(log.message)));
   }
@@ -138,6 +140,7 @@ await run('Native stock-size React and Three.js camera-offset tiles',async()=>{
   const model = await render(three,'4K');
   assert.equal(model.strategy,'tiled contract');
   assert.equal(model.backend,'Three.js / WebGL');
+  assert.deepEqual(model.actual,{width:4096,height:2304});
   return {react:dom.actual,three:model.actual,gpu:model.gpu};
 });
 
@@ -238,6 +241,43 @@ await run('Transient ExifTool error retries metadata only and cancellation clean
     assert.deepEqual(await fs.readdir(queue.workspace),[]);
     return {attempts:2,completed:1,cancelled:1};
   } finally {restore();await queue.shutdown();}
+});
+
+await run('Restart during metadata resumes a real encoded checkpoint without the source',async()=>{
+  const database=path.join(runDirectory,'restart-database');
+  const out=path.join(runDirectory,'restart-images');
+  const original=path.join(fixtures,'restart.html');
+  await fs.mkdir(out);
+  await fs.copyFile(source('greeting-card.html'),original);
+  let queue, stopping;
+  queue=await new RenderQueue(database,jobs=>{
+    if (!stopping && jobs[0]?.progress.at(-1)?.phase==='metadata') stopping=queue.shutdown();
+  }).init();
+  await queue.importFiles([original]);
+  queue.start({...autopilotDefaults,preset:'4K'},out);
+  const deadline=Date.now()+120_000;
+  while (!stopping) {
+    if (Date.now()>deadline) throw new Error('Did not reach metadata checkpoint');
+    await new Promise(resolve=>setTimeout(resolve,50));
+  }
+  await stopping;
+  assert.equal(queue.jobs[0].status,'queued');
+  const receipt=queue.jobs[0].recovery;
+  await fs.access(receipt.encoded);
+  await fs.rename(original,original+'.held');
+  queue=await new RenderQueue(database).init();
+  try {
+    await idle(queue);
+    const result=queue.jobs[0];
+    assert.equal(result.status,'completed',result.error);
+    assert(result.result.recovered);
+    assert.equal((await readEmbeddedMetadata(result.result.output)).keywords[3],'2027');
+    assert.deepEqual(await fs.readdir(queue.workspace),[]);
+    return {actual:result.result.actual,output:result.result.output};
+  } finally {
+    await queue.shutdown();
+    await fs.rename(original+'.held',original);
+  }
 });
 
 if (failed) process.exitCode=1;
