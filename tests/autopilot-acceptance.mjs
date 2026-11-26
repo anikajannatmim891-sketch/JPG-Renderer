@@ -160,10 +160,11 @@ await run('200-entry SQLite batch, deduplication, pause, restart, and clean outp
   const base = '<!doctype html><title>Batch gradients</title><meta name=description content="A gradient test pattern">' +
     '<meta name=keywords content="2027,007,gradients"><style>html,body{margin:0}main{width:200px;height:200px;' +
     'background:linear-gradient(140deg,#15253d,#c98d70,#8adbbc);display:grid;place-items:center;color:#ffeacb;font:30px serif}</style>';
+  const mixed = await Promise.all(['greeting-card.html','legacy-canvas.html','legacy-fullscreen.html'].map(name=>fs.readFile(source(name),'utf8')));
   for (let i=0;i<200;i++) {
     const file = path.join(folder,String(i).padStart(3,'0')+'.html');
     const markup = i===0 ? '<main id="artwork" style="width:1000px;height:1480px"></main><script>throw new Error("broken test entry")</script>' :
-      base + '<main id=artwork>' + i + '</main>';
+      mixed[i-1] ?? (base + '<main id=artwork>' + i + '</main>');
     await fs.writeFile(file,markup);
   }
   const files = await scanFolder(folder,false);

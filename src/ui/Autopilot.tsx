@@ -1,26 +1,31 @@
-import React, {useEffect,useState} from 'react';
+import React, {useEffect,useRef,useState} from 'react';
 import './autopilot.css';
 
 type Dimensions = {width:number;height:number;source?:string;notes?:string[]};
-type Preferences = {profile:string;preset:string;customEdge:number;qualityFloor:number;allowLower:boolean;recursive:boolean};
+type Preferences = {profile:string;preset:string;customEdge:number;qualityFloor:number;allowLower:boolean;recursive:boolean;hardwareOnly:boolean;sampleLimit:number;renderBudgetMs:number};
 type Job = {
   id:string;status:string;input:{source:string;autopilotImport?:boolean};detected?:Dimensions;planned?:Dimensions;
-  backend?:string;strategy?:string;started?:number;finished?:number;error?:string;
+  backend?:string;gpu?:Record<string,unknown>;strategy?:string;started?:number;finished?:number;error?:string;
   progress:{phase:string;message:string;percent?:number}[];
-  result?:{actual:Dimensions;durationMs:number;output:string;recovered?:boolean;strategy?:string;backend?:string};
+  result?:{actual:Dimensions;durationMs:number;output:string;recovered?:boolean;strategy?:string;backend?:string;samples?:number;gpu?:Record<string,unknown>};
 };
 const names:Record<string,string> = {
   imported:'Imported',queued:'Waiting',paused:'Paused',completed:'Completed',failed:'Failed',review:'Metadata review',cancelled:'Cancelled',
-  analyzing:'Analyzing',planned:'Analyzing',backend:'Analyzing',rendering:'Rendering',tile:'Rendering',fallback:'Recovering',
+  analyzing:'Analyzing',planned:'Analyzing',backend:'Analyzing',rendering:'Rendering',sampling:'Accumulating samples',sampled:'Rendering',tile:'Rendering',fallback:'Recovering',
   encoding:'Encoding',metadata:'Embedding metadata',verifying:'Verifying',running:'Analyzing',
 };
 const dimensions = (pair?:Dimensions) => pair ? pair.width.toLocaleString() + ' × ' + pair.height.toLocaleString() : '—';
 const needsAttention = (job:Job) => ['failed','review'].includes(job.status);
 const last = (job:Job) => job.progress.at(-1);
 const phase = (job:Job) => job.status === 'running' ? last(job)?.phase || 'running' : job.status;
-const initial:Preferences = {profile:'adobe',preset:'10K',customEdge:10240,qualityFloor:88,allowLower:false,recursive:false};
+const initial:Preferences = {profile:'adobe',preset:'10K',customEdge:10240,qualityFloor:88,allowLower:false,recursive:false,hardwareOnly:false,sampleLimit:512,renderBudgetMs:240000};
 
-export function Autopilot() {
+export type ProductionView = 'autopilot'|'queue'|'completed'|'attention'|'history'|'settings'|'diagnostics';
+
+export function Autopilot({view}:{view:ProductionView}) {
+  const dashboard=useRef<HTMLElement>(null);
+  const queueArea=useRef<HTMLElement>(null);
+  const outputSettings=useRef<HTMLDetailsElement>(null);
   const [jobs,setJobs] = useState<Job[]>([]);
   const [prefs,setPrefs] = useState(initial);
   const [destination,setDestination] = useState('');
@@ -29,7 +34,7 @@ export function Autopilot() {
   const [error,setError] = useState('');
   const [busy,setBusy] = useState(false);
   const [dragging,setDragging] = useState(false);
-  const [tab,setTab] = useState<'queue'|'attention'>('queue');
+  const [tab,setTab] = useState<'queue'|'attention'|'completed'|'history'|'diagnostics'>('queue');
   const [page,setPage] = useState(0);
   const [activePreview,setActivePreview] = useState<{id:string;url:string}|null>(null);
   const [metadataDraft,setMetadataDraft] = useState<{id:string;title:string;description:string;keywords:string;rating:number}|null>(null);
@@ -50,6 +55,20 @@ export function Autopilot() {
     }).catch(error=>mounted && setError(error.message));
     return ()=>{mounted=false;unsubscribe();};
   },[]);
+
+  useEffect(()=>{
+    setPage(0);
+    if (view==='autopilot') {
+      setTab('queue');
+      dashboard.current?.scrollTo({top:0});
+    } else if (view==='settings') {
+      if (outputSettings.current) outputSettings.current.open=true;
+      outputSettings.current?.scrollIntoView({block:'nearest'});
+    } else {
+      setTab(view);
+      queueArea.current?.scrollIntoView({block:'start'});
+    }
+  },[view]);
 
   async function call(channel:string,...args:unknown[]) {
     setError('');
@@ -84,19 +103,21 @@ export function Autopilot() {
   const counters:[string,number][] = [
     ['Imported',jobs.length],['Analyzing',running.filter(j=>['analyzing','planned','backend','running'].includes(phase(j))).length],
     ['Waiting',waiting.length + imported.length + jobs.filter(j=>j.status==='paused').length],
-    ['Rendering',running.filter(j=>['rendering','tile','fallback','encoding'].includes(phase(j))).length],
-    ['Embedding metadata',running.filter(j=>phase(j)==='metadata').length],
+    ['Rendering',running.filter(j=>['rendering','tile','fallback','sampling','sampled'].includes(phase(j))).length],
+    ['Encoding',running.filter(j=>phase(j)==='encoding').length],['Embedding metadata',running.filter(j=>phase(j)==='metadata').length],
     ['Verifying',running.filter(j=>phase(j)==='verifying').length],
     ['Completed',completed.length],['Recovered',completed.filter(j=>j.result?.recovered).length],['Needs attention',attention.length],
   ];
-  const visible = tab==='attention' ? attention : jobs;
+  const visible = tab==='attention' ? attention :
+    tab==='completed' ? completed : tab==='history' ? jobs.filter(j=>['completed','failed','review','cancelled'].includes(j.status)).slice().reverse() :
+    tab==='diagnostics' ? jobs.filter(j=>j.gpu || j.result?.gpu || j.error) : jobs;
   const size = 35;
   const pages = Math.max(1,Math.ceil(visible.length/size));
   const currentPage = Math.min(page,pages-1);
   const detail = visible.find(j=>j.id===selected);
   const control = (action:string,id?:string) => void call('batch-control',action,id);
 
-  return <main className="autopilot" onDragOver={event=>{event.preventDefault();setDragging(true);}}
+  return <main className="autopilot" ref={dashboard} onDragOver={event=>{event.preventDefault();setDragging(true);}}
     onDragLeave={event=>{if(!event.currentTarget.contains(event.relatedTarget as Node))setDragging(false);}}
     onDrop={event=>{
       event.preventDefault();setDragging(false);
@@ -129,24 +150,31 @@ export function Autopilot() {
           <button disabled={!destination} onClick={()=>void call('folder')}>Open Output Folder</button>
         </div>
         <label>Global Resolution Preset<select value={prefs.preset} onChange={e=>change({preset:e.target.value})}>
-          {['4K','6K','8K','10K','12K'].map(p=><option key={p}>{p}</option>)}
+          {['4K','6K','8K','10K','12K',...(['general','transparent'].includes(prefs.profile)?['16K']:[])].map(p=><option key={p}>{p}</option>)}
           <option value="custom">Custom longest edge</option><option value="max">Maximum within stock limits</option>
         </select></label>
-        <label>Output Profile<select value={prefs.profile} onChange={e=>change({profile:e.target.value})}>
+        <label>Output Profile<select value={prefs.profile} onChange={e=>change({profile:e.target.value,...(prefs.preset==='16K'&&['adobe','shutterstock'].includes(e.target.value)?{preset:'10K'}:{})})}>
           <option value="adobe">Adobe Stock</option><option value="shutterstock">Shutterstock</option>
+          <option value="general">General JPEG</option><option value="transparent">Transparent PNG</option>
         </select></label>
         {prefs.preset==='custom'&&<label>Longest edge in pixels<input type="number" min="1" max="65535" value={prefs.customEdge} onChange={e=>change({customEdge:Number(e.target.value)})}/></label>}
-        <details className="production-settings">
+        <details className="production-settings" ref={outputSettings}>
           <summary>Output options</summary>
           <label>JPEG quality floor<input type="number" min="1" max="96" value={prefs.qualityFloor} onChange={e=>change({qualityFloor:Number(e.target.value)})}/></label>
           <label className="production-check"><input type="checkbox" checked={prefs.allowLower} onChange={e=>change({allowLower:e.target.checked})}/> Allow a lower native resolution when WebGL limits require it</label>
+          <label className="production-check"><input type="checkbox" checked={prefs.hardwareOnly}
+            onChange={e=>change({hardwareOnly:e.target.checked})}/> Require verified hardware for GPU artwork</label>
+          <label>Progressive sample limit<input type="number" min="1" max="4096" value={prefs.sampleLimit}
+            onChange={e=>change({sampleLimit:Number(e.target.value)})}/></label>
+          <label>Render time budget (minutes)<input type="number" min="0.5" max="60" step="0.5" value={prefs.renderBudgetMs/60000}
+            onChange={e=>change({renderBudgetMs:Number(e.target.value)*60000})}/></label>
         </details>
       </section>
     </div>
     <section className="production-counts" aria-label="Production counts">
       {counters.map(([label,value])=><div key={label} className={label==='Needs attention'&&value?'attention-count':''}><strong>{value.toLocaleString()}</strong><span>{label}</span></div>)}
     </section>
-    <section className="production-queue" aria-label="Render queue">
+    <section className="production-queue" ref={queueArea} aria-label="Render queue">
       <div className="production-queue-header">
         <div className="queue-tabs">
           <button className={tab==='queue'?'current':''} onClick={()=>{setTab('queue');setPage(0);}}>Queue</button>
@@ -173,7 +201,7 @@ export function Autopilot() {
             <td>{dimensions(job.detected)}</td><td>{dimensions(job.result?.actual || job.planned)}</td>
             <td>{job.result?.backend || job.backend || '—'}</td>
             <td><span className={'production-status '+status}>{names[status] || status}</span>
-              {job.status==='running' && progress?.phase==='tile' && <progress aria-label="Tiles captured" value={progress.percent || 0} max={1}/>}
+              {job.status==='running' && ['tile','sampling'].includes(progress?.phase || '') && <progress aria-label={progress?.phase==='sampling'?'Sample progress':'Tiles captured'} value={progress?.percent || 0} max={1}/>}
             </td>
             <td><div className="production-actions row-actions">
               {['queued','running'].includes(job.status)&&<button onClick={()=>control('pause',job.id)}>Pause</button>}
@@ -193,7 +221,7 @@ export function Autopilot() {
             </div></td>
           </tr>;
         })}</tbody></table>
-        {!visible.length&&<div className="production-empty">{tab==='attention'?'No artwork needs attention.':'Add files or a folder to start a batch.'}</div>}
+        {!visible.length&&<div className="production-empty">{tab==='attention'?'No artwork needs attention.':tab==='queue'?'Add files or a folder to start a batch.':'No artwork to display.'}</div>}
       </div>
       {detail&&<section className="production-detail" aria-label="Artwork details">
         {activePreview?.id===detail.id&&<img src={activePreview.url} alt="Thumbnail of completed JPEG"/>}
@@ -202,6 +230,10 @@ export function Autopilot() {
           {detail.detected&&<p>Design size from {detail.detected.source}. {detail.detected.notes?.join(' ')}</p>}
           {detail.strategy&&<p>Capture strategy · {detail.strategy}</p>}
           {detail.result&&<p>{detail.result.output}</p>}
+          {detail.result?.samples!==undefined&&<p>{detail.result.samples} completed samples</p>}
+          {tab==='diagnostics'&&(detail.result?.gpu||detail.gpu)&&<pre className="production-diagnostics">
+            {JSON.stringify(detail.result?.gpu || detail.gpu,null,2)}
+          </pre>}
           {detail.status==='review' && metadataDraft && metadataDraft.id===detail.id&&
             <form className="production-review" onSubmit={async event=>{
               event.preventDefault();

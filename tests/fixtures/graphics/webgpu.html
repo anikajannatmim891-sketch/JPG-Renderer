@@ -1,0 +1,36 @@
+<!doctype html><meta charset="utf-8"><style>body{margin:0}canvas{width:960px;height:540px;display:block}</style>
+<canvas></canvas><script>
+const canvas=document.querySelector('canvas');
+const context=canvas.getContext('webgpu');
+let device,pipeline,buffer,bindGroup;
+const format=navigator.gpu?.getPreferredCanvasFormat();
+async function ready(){
+  const adapter=await navigator.gpu?.requestAdapter({powerPreference:'high-performance'});
+  if(!adapter||!context)throw new Error('No WebGPU adapter for artwork');
+  device=await adapter.requestDevice({requiredLimits:{maxTextureDimension2D:adapter.limits.maxTextureDimension2D}});
+  context.configure({device,format,alphaMode:'opaque'});
+  const source=await fetch('procedural.wgsl').then(r=>r.text());
+  const module=device.createShaderModule({code:source});
+  pipeline=await device.createRenderPipelineAsync({layout:'auto',vertex:{module,entryPoint:'vertex'},
+    fragment:{module,entryPoint:'fragment',targets:[{format}]}});
+  buffer=device.createBuffer({size:16,usage:GPUBufferUsage.UNIFORM|GPUBufferUsage.COPY_DST});
+  bindGroup=device.createBindGroup({layout:pipeline.getBindGroupLayout(0),entries:[{binding:0,resource:{buffer}}]});
+}
+window.renderStudio={
+  version:2,engine:'WebGPU / WGSL',design:{width:960,height:540},ready,
+  capabilities:{tiles:true,tilePadding:0,tileSize:480},
+  render({width,height,tile}){
+    canvas.width=tile?.width??width;
+    canvas.height=tile?.height??height;
+    canvas.style.width=tile?(tile.width/(width/960))+'px':'960px';
+    canvas.style.height=tile?(tile.height/(height/540))+'px':'540px';
+    device.queue.writeBuffer(buffer,0,new Float32Array([width,height,tile?.x??0,tile?.y??0]));
+    const encoder=device.createCommandEncoder();
+    const pass=encoder.beginRenderPass({colorAttachments:[{view:context.getCurrentTexture().createView(),
+      loadOp:'clear',storeOp:'store',clearValue:{r:0,g:0,b:0,a:1}}]});
+    pass.setPipeline(pipeline);pass.setBindGroup(0,bindGroup);pass.draw(3);pass.end();
+    device.queue.submit([encoder.finish()]);
+  },
+  dispose(){device?.destroy();},
+};
+</script>

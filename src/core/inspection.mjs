@@ -154,8 +154,9 @@ export function installCanvasTracking({fixed2D, shaderTile, offline} = {}) {
   Object.defineProperty(globalThis, '__uvrsCanvases', {value: () => [...document.querySelectorAll('canvas')].map(canvas => {
     const {context, ...record} = records.get(canvas) || {};
     const rect = nativeRect.call(canvas);
-    const result = {...record, width:dimensions.width.get.call(canvas), height:dimensions.height.get.call(canvas),
+    const result = {...record, type:record.type || (globalThis.__uvrsOffscreen?.(canvas) ? 'OffscreenCanvas' : undefined), width:dimensions.width.get.call(canvas), height:dimensions.height.get.call(canvas),
       cssWidth:rect.width, cssHeight:rect.height, x:rect.x, y:rect.y};
+    if (record.type==='webgpu') result.surface=globalThis.__uvrsSurface?.(canvas);
     if (record.webgl) {
       context.finish();
       Object.assign(result, {bufferWidth:context.drawingBufferWidth, bufferHeight:context.drawingBufferHeight, lost:context.isContextLost()});
@@ -189,7 +190,13 @@ export function measureLayout(selector) {
     contract:{exists:!!window.renderStudio, render:typeof window.renderStudio?.render === 'function',
       tiles:window.renderStudio?.capabilities?.tiles === true, version:window.renderStudio?.version,
       tilePadding:window.renderStudio?.capabilities?.tilePadding,
-      threeViewOffset:window.renderStudio?.capabilities?.threeViewOffset === true, design:window.renderStudio?.design},
+      tileSize:window.renderStudio?.capabilities?.tileSize,
+      threeViewOffset:window.renderStudio?.capabilities?.threeViewOffset === true,
+      babylonProjection:window.renderStudio?.capabilities?.babylonProjection === true,
+      engine:window.renderStudio?.engine,
+      progressive:window.renderStudio?.progressive,sample:typeof window.renderStudio?.sample==='function',
+      design:window.renderStudio?.design},
+    offscreen:globalThis.__uvrsOffscreenTypes?.() || [],
     constants:{width:constant('CW'),height:constant('CH')},
     fixed2DPattern:/\.width\s*=\s*CW\b/.test(scripts) && /\.height\s*=\s*CH\b/.test(scripts) &&
       !/\b(?:devicePixelRatio|pixelRatio|OffscreenCanvas)\b/.test(scripts),

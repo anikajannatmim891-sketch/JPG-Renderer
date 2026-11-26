@@ -96,7 +96,7 @@ if (singleInstance) app.whenReady().then(async()=>{
       source:j.input.source,sha256:j.hash,status:j.status,attempts:j.attempts,detected:j.result?.detected || j.detected,
       planned:j.planned,actual:j.result?.actual,output:j.result?.output,backend:j.result?.backend || j.backend,
       strategy:j.result?.strategy || j.strategy,hardware:j.result?.gpu || j.gpu,metadata:j.result?.metadata?.status,
-      recovered:j.result?.recovered,outputProfile:j.result?.settings?.profile,quality:j.result?.settings?.quality,
+      recovered:j.result?.recovered,samples:j.result?.samples,durationMs:j.result?.durationMs,outputProfile:j.result?.settings?.profile,quality:j.result?.settings?.quality,
       warnings:j.result?.validation?.warnings,diagnostic:j.error,
     }));
     await fs.writeFile(result.filePath,JSON.stringify({application:app.getVersion(),jobs},null,2));

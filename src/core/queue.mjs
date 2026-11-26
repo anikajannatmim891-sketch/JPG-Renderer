@@ -10,15 +10,18 @@ import {presets,profiles} from './dimensions.mjs';
 
 const extensions = new Set(['.html','.htm','.svg','.js','.mjs','.jsx','.ts','.tsx']);
 const terminal = new Set(['completed','failed','cancelled','review']);
-export const autopilotDefaults = {profile:'adobe',preset:'10K',customEdge:10240,qualityFloor:88,allowLower:false,recursive:false};
+export const autopilotDefaults = {profile:'adobe',preset:'10K',customEdge:10240,qualityFloor:88,allowLower:false,recursive:false,hardwareOnly:false,sampleLimit:512,renderBudgetMs:240000};
 
 export function validatePreferences(preferences) {
-  const {profile,preset,customEdge,qualityFloor,allowLower,recursive} = preferences;
+  const {profile,preset,customEdge,qualityFloor,allowLower,recursive,hardwareOnly,sampleLimit,renderBudgetMs} = {...autopilotDefaults,...preferences};
   if (!Object.hasOwn(profiles,profile) || !(Object.hasOwn(presets,preset) || ['max','custom'].includes(preset)) ||
       !Number.isSafeInteger(customEdge) || customEdge < 1 || customEdge > 65535 ||
       !Number.isInteger(qualityFloor) || qualityFloor < 1 || qualityFloor > 96 ||
-      typeof allowLower !== 'boolean' || typeof recursive !== 'boolean') throw new Error('Invalid Autopilot preferences');
-  return {profile,preset,customEdge,qualityFloor,allowLower,recursive};
+      typeof allowLower !== 'boolean' || typeof recursive !== 'boolean' || typeof hardwareOnly !== 'boolean' ||
+      !Number.isSafeInteger(sampleLimit) || sampleLimit<1 || sampleLimit>4096 ||
+      !Number.isSafeInteger(renderBudgetMs) || renderBudgetMs<30000 || renderBudgetMs>3600000 ||
+      (preset==='16K' && profiles[profile].stock)) throw new Error('Invalid Autopilot preferences');
+  return {profile,preset,customEdge,qualityFloor,allowLower,recursive,hardwareOnly,sampleLimit,renderBudgetMs};
 }
 
 const artworkFile = file => extensions.has(path.extname(file).toLowerCase());
@@ -318,7 +321,7 @@ export class RenderQueue {
         job.status = active.stop;
         if (active.stop === 'cancelled') {cleanup=job.recovery?.encoded;delete job.recovery;}
       } else if (error.needsReview) job.status = 'review';
-      else if (job.input.autopilotImport && job.recovery && job.attempts < 3) job.status = 'queued';
+      else if (job.input.autopilotImport && ((job.recovery && job.attempts<3) || (error.retryable && job.attempts<2))) job.status = 'queued';
       else job.status = 'failed';
     }
     this.save(job);

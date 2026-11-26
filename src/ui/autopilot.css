@@ -33,7 +33,7 @@
 .production-settings summary { cursor:pointer; }
 .production-settings label { margin-top:7px; }
 .production-settings input[type=number] { max-width:110px; }
-.production-counts { display:grid; grid-template-columns:repeat(9,1fr); gap:1px; padding:1px; margin-bottom:19px; background:#344142; border-radius:8px; overflow:hidden; }
+.production-counts { display:grid; grid-template-columns:repeat(10,1fr); gap:1px; padding:1px; margin-bottom:19px; background:#344142; border-radius:8px; overflow:hidden; }
 .production-counts div { padding:12px 10px; background:#1a2224; min-width:0; }
 .production-counts strong,.production-counts span { display:block; }
 .production-counts strong { font-size:21px; margin-bottom:2px; }
@@ -74,3 +74,8 @@
 
 .production-review { max-width:500px; margin-top:10px; }
 .production-review input[type=number] { max-width:85px; }
+
+.studio-navigation nav { flex-wrap:wrap; height:auto; padding:5px 0; gap:2px; }
+.studio-navigation nav button { white-space:nowrap; }
+.studio-brand { min-width:156px; }
+.production-diagnostics { max-height:270px; overflow:auto; }

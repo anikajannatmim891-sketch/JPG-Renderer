@@ -1,7 +1,9 @@
-export const presets = {'4K':4096,'6K':6144,'8K':8192,'10K':10240,'12K':12288};
+export const presets = {'4K':4096,'6K':6144,'8K':8192,'10K':10240,'12K':12288,'16K':16384};
 export const profiles = {
-  adobe:{label:'Adobe Stock', minPixels:4e6, maxPixels:100e6, maxBytes:45e6, maxEdge:65535, keywords:49},
-  shutterstock:{label:'Shutterstock', minPixels:4e6, maxPixels:100e6, maxBytes:50e6, maxEdge:65535, keywords:50},
+  adobe:{label:'Adobe Stock',stock:true,format:'jpeg', minPixels:4e6, maxPixels:100e6, maxBytes:45e6, maxEdge:65535, keywords:49},
+  shutterstock:{label:'Shutterstock',stock:true,format:'jpeg', minPixels:4e6, maxPixels:100e6, maxBytes:50e6, maxEdge:65535, keywords:50},
+  general:{label:'General JPEG',stock:false,format:'jpeg',minPixels:1,maxPixels:220e6,maxBytes:Infinity,maxEdge:32768,keywords:49},
+  transparent:{label:'Transparent PNG',stock:false,format:'png',minPixels:1,maxPixels:150e6,maxBytes:Infinity,maxEdge:32768,keywords:49},
 };
 
 export const gcd = (a, b) => b ? gcd(b, a % b) : a;
@@ -21,6 +23,7 @@ export function planDimensions(cssWidth, cssHeight, {preset='10K', customEdge=10
   if (!valid(cssWidth, cssHeight)) throw new Error('Artwork needs a verified integer CSS width and height');
   const limits = profiles[profile];
   if (!limits) throw new Error('Unknown stock profile');
+  if (preset==='16K' && limits.stock) throw new Error('16K requires a non-stock output profile');
   const edge = preset === 'max' ? limits.maxEdge : preset === 'custom' ? customEdge : presets[preset];
   if (!Number.isSafeInteger(edge) || edge < 1 || edge > 65535) throw new Error('Invalid longest-edge preference');
   const divisor = gcd(cssWidth, cssHeight);

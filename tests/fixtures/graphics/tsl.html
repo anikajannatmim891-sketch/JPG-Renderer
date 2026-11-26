@@ -1,0 +1,26 @@
+<!doctype html><meta charset="utf-8"><style>body{margin:0}canvas{width:960px;height:540px;display:block}</style>
+<script type="importmap">
+{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js"}}
+</script>
+<script type="module">
+import {WebGPURenderer, Scene, OrthographicCamera, MeshBasicNodeMaterial, PlaneGeometry, Mesh} from 'three/webgpu';
+import {uv, vec3, sin} from 'three/tsl';
+const renderer=new WebGPURenderer({antialias:true});
+document.body.append(renderer.domElement);
+const scene=new Scene();
+const camera=new OrthographicCamera(-1,1,1,-1,0,5);
+camera.position.z=1;
+const coord=uv();
+const material=new MeshBasicNodeMaterial();
+material.colorNode=vec3(coord.x.mul(.8).add(.1), coord.y.mul(.8).add(.1), sin(coord.x.mul(28)).mul(.3).add(.5));
+scene.add(new Mesh(new PlaneGeometry(2,2),material));
+window.renderStudio={
+  version:2,engine:'Three.js WebGPU / TSL',design:{width:960,height:540},
+  ready:()=>renderer.init(),
+  render({width,height}){
+    renderer.setSize(width,height,false);
+    renderer.render(scene,camera);
+  },
+  dispose:()=>renderer.dispose(),
+};
+</script>

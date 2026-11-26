@@ -89,7 +89,7 @@ export async function retryEncodedMetadata(options) {
     completed.validation.warnings.push(...(r.warnings || []));
     const result = {output:r.output,requested:r.requested,actual:r.actual,source:r.source,settings:r.settings,gpu:r.gpu,
       runtimeMetadata:r.runtime,detected:r.detected,backend:r.backend,strategy:r.strategy,
-      recovered:!options.initial || r.recovered,logs,durationMs:Date.now()-(r.started || Date.now()),...completed};
+      samples:r.samples,recovered:!options.initial || r.recovered,logs,durationMs:Date.now()-(r.started || Date.now()),...completed};
     if (r.writeManifest !== false && options.writeManifest !== false)
       await fs.writeFile(r.output+'.json',JSON.stringify(result,null,2),{flag:'wx'}).catch(error=>{
         completed.validation.warnings.push('Technical manifest could not be saved: ' + error.message);

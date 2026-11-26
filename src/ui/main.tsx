@@ -1,7 +1,7 @@
 import React,{useEffect,useRef,useState} from 'react';
 import {createRoot} from 'react-dom/client';
 import './style.css';
-import {Autopilot} from './Autopilot';
+import {Autopilot,type ProductionView} from './Autopilot';
 import {MetadataPanel,type MetadataConfig,type MetadataReport} from './Metadata';
 type Settings={width:number;height:number;designWidth:number;format:string;quality:number;transparent:boolean;stock:boolean;time:number;seed:number;strategy:string;allowSoftware:boolean;allowedOrigins:string[];timeout:number};
 type Project={id:string;name:string;entry:string;kind:string;files:string[];manifest:Record<string,unknown>;metadata:MetadataReport};
@@ -10,15 +10,19 @@ type Job={id:string;status:string;input:{preview?:boolean;settings:Settings;sour
 declare global{interface Window{studio:{call:(channel:string,...args:unknown[])=>Promise<any>;filePath:(file:File)=>string;onJobs:(fn:(jobs:Job[],paused:boolean)=>void)=>()=>void}}}
 const initial:Settings={width:3840,height:2160,designWidth:1920,format:'jpeg',quality:96,transparent:false,stock:false,time:0,seed:1,strategy:'direct',allowSoftware:false,allowedOrigins:[],timeout:30000};
 function App() {
- const [view,setView]=useState<'autopilot'|'advanced'>('autopilot');
+ const [view,setView]=useState<ProductionView|'advanced'>('autopilot');
+ const navigation:[ProductionView|'advanced',string][] = [
+   ['autopilot','Autopilot'],['advanced','Advanced Studio'],['queue','Production Queue'],['completed','Completed'],
+   ['attention','Needs Attention'],['history','History'],['settings','Settings'],['diagnostics','Diagnostics'],
+ ];
  return <div className="studio-shell">
    <div className="studio-navigation"><div className="studio-brand"><span aria-hidden="true">◈</span> Universal Visual Render Studio</div>
      <nav aria-label="Studio mode">
-       <button className={view==='autopilot'?'current':''} onClick={()=>setView('autopilot')}>Autopilot</button>
-       <button className={view==='advanced'?'current':''} onClick={()=>setView('advanced')}>Advanced Studio</button>
+       {navigation.map(([id,label])=><button key={id} className={view===id?'current':''}
+         aria-current={view===id?'page':undefined} onClick={()=>setView(id)}>{label}</button>)}
      </nav>
    </div>
-   {view==='autopilot' ? <Autopilot/> : <AdvancedStudio/>}
+   {view==='advanced' ? <AdvancedStudio/> : <Autopilot view={view}/>}
  </div>;
 }
 function AdvancedStudio(){

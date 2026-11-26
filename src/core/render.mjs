@@ -10,6 +10,8 @@ import {readSourceMetadata,resolveMetadata,metadataDefaults} from './metadata.mj
 import {finalizeEncoded,retryEncodedMetadata} from './finalize.mjs';
 import {close,gcd,planDimensions,profiles,viewportFor} from './dimensions.mjs';
 import {installCanvasTracking,measureLayout,selectLayout,projectHint,legacyShader} from './inspection.mjs';
+import {installGPUTracking,probeWebGPU,reportWebGPU} from './gpu.mjs';
+import {progressivePolicy,accumulate} from './progressive.mjs';
 
 export async function gpuProbe(page) {
   const gpu = await page.evaluate(() => {
@@ -42,6 +44,7 @@ async function openArtwork(browser, server, s, viewport, adapters) {
     deviceScaleFactor:viewport.ratio,acceptDownloads:false,serviceWorkers:'block'});
   const failures = [];
   try {
+    await context.addInitScript(installGPUTracking);
     await context.addInitScript(installCanvasTracking,{...adapters,offline:!s.allowedOrigins.length});
     await context.route('**/*',async route => {
       const u = new URL(route.request().url());
@@ -84,30 +87,68 @@ async function openArtwork(browser, server, s, viewport, adapters) {
 }
 
 function checkContract(project, contract, s) {
-  if (contract.exists && (!contract.render || contract.version !== 1))
-    throw new Error('Unsupported render contract; expected version: 1 and render()');
+  if (contract.exists && (!contract.render || ![1,2].includes(contract.version)))
+    throw new Error('Unsupported render contract; expected version 1 or 2 and render()');
+  progressivePolicy(contract,s);
   if ((project.manifest.readiness === 'explicit' || s.time !== 0) && !contract.render)
     throw new Error('An explicit renderStudio contract is required for the requested readiness or time');
 }
 
-async function frame(page, contract, args) {
-  await page.evaluate(async ({contract,args}) => {
-    if (contract.render) {
-      const studio = window.renderStudio;
-      const tile = args.tile;
-      if (tile && contract.threeViewOffset) {
-        const camera = studio.threeCamera;
-        if (typeof camera?.setViewOffset !== 'function' || typeof camera.clearViewOffset !== 'function' || camera.view?.enabled)
-          throw new Error('Three.js tile adapter requires an exposed camera without a pre-existing view offset');
-        camera.setViewOffset(tile.fullWidth,tile.fullHeight,tile.x,tile.y,tile.width,tile.height);
-        try {await studio.render(args);}
-        finally {camera.clearViewOffset();}
-      } else await studio.render(args);
+async function frame(page, contract, args, settings, check, report) {
+  const progressive = progressivePolicy(contract,settings);
+  await page.evaluate(async ({contract,args})=>{
+    if (!contract.render) {
+      if (document.getAnimations().some(a=>a.playState==='running'))
+        throw new Error('Running animations require a deterministic renderStudio contract');
+      return;
     }
-    else if (document.getAnimations().some(a=>a.playState === 'running'))
-      throw new Error('Running animations require a deterministic renderStudio contract');
-    await new Promise(resolve => requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+    const studio = window.renderStudio;
+    if (args.tile && contract.threeViewOffset) {
+      const camera = studio.threeCamera;
+      if (typeof camera?.setViewOffset!=='function' || typeof camera.clearViewOffset!=='function' || camera.view?.enabled)
+        throw new Error('Three.js tile adapter requires an exposed camera without a pre-existing view offset');
+      const tile=args.tile;
+      camera.setViewOffset(tile.fullWidth,tile.fullHeight,tile.x,tile.y,tile.width,tile.height);
+    }
+    if (args.tile && contract.version===2) await studio.beginTile?.(args);
+    await studio.render(args);
   },{contract,args});
+  const samples = await accumulate(page,progressive,args,check,(done,minimum,maximum)=>{
+    report('sampling','Completed '+done+' samples · target '+minimum+(maximum!==minimum?' · budget '+maximum:''),
+      Math.min(1,done/(progressive.requireConvergence?maximum:minimum)),{samples:done});
+  });
+  await page.evaluate(async ({contract,args})=>{
+    if (contract.version===2) await window.renderStudio?.flush?.(args);
+    try {await globalThis.__uvrsGPU?.(true);}
+    catch(error) {throw new Error('WebGPU device or presentation queue failed: '+error.message);}
+    await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  },{contract,args});
+  return samples;
+}
+
+async function finishFrame(page,contract,args) {
+  if (!args.tile) return;
+  await page.evaluate(async ({contract,args})=>{
+    if (contract.version===2) await window.renderStudio?.endTile?.(args);
+    if (contract.threeViewOffset) window.renderStudio.threeCamera.clearViewOffset();
+  },{contract,args});
+}
+
+async function webGPUProbe(browser,server) {
+  const context = await browser.newContext({serviceWorkers:'block'});
+  try {
+    await context.addInitScript(installGPUTracking);
+    const page = await context.newPage();
+    await page.goto(server.base+'__uvrs_probe');
+    return await page.evaluate(probeWebGPU);
+  } finally {await context.close();}
+}
+
+function gpuKind(layout) {
+  const types = [...layout.canvases.map(c=>c.type),...layout.offscreen];
+  const webgpu = types.includes('webgpu') || /webgpu|wgsl|tsl/i.test(layout.contract.engine || '');
+  const webgl = types.some(type=>/webgl/i.test(type || '')) || (!webgpu && /webgl|path.?trac/i.test(layout.contract.engine || ''));
+  return {webgpu,webgl};
 }
 
 async function setSVGViewport(page, viewport) {
@@ -145,7 +186,7 @@ function assertCanvases(canvases, s, ratio, gpu) {
     if (c.width + 1 < c.cssWidth * ratio || c.height + 1 < c.cssHeight * ratio)
       throw new Error('Canvas backing store ' + c.width + '×' + c.height + ' is below effective resolution');
     if (c.webgl) {
-      if (gpu.software && !s.allowSoftware) throw new Error('Software WebGL detected. Enable it explicitly or use a hardware GPU.');
+      if (!s.allowSoftware && (gpu.software || !gpu.webgl || !gpu.renderer || gpu.renderer==='Unavailable')) throw new Error('Software WebGL detected. Enable it explicitly or use a hardware GPU.');
       if (c.lost || c.bufferWidth !== c.width || c.bufferHeight !== c.height)
         throw new Error('WebGL drawing buffer does not match requested canvas, or context was lost');
     }
@@ -159,8 +200,10 @@ function tilePlan(s, viewport, gpu, contract) {
   if (!Number.isFinite(padding) || padding < 0 || padding > 512) throw new Error('Invalid contract tilePadding');
   const overlapCss = Math.ceil(padding / alignment) * alignment;
   const overlap = Math.round(overlapCss * ratio);
-  const limit = Math.min(gpu.maxRenderbufferSize || 4096, ...(gpu.maxViewport || [4096]));
-  const maxCss = Math.min(1024, Math.floor(limit / ratio) - 2 * overlapCss);
+  const limit = Math.min(gpu.maxRenderbufferSize || gpu.webgpu?.maxTextureDimension2D || 4096, gpu.webgpu?.maxTextureDimension2D || Infinity, ...(gpu.maxViewport || [Infinity]));
+  const tileSize = contract.tileSize ?? 1024;
+  if (!Number.isInteger(tileSize) || tileSize<16 || tileSize>1024) throw new Error('Invalid contract tileSize');
+  const maxCss = Math.min(tileSize, Math.floor(limit / ratio) - 2 * overlapCss);
   const step = Math.round(Math.floor(maxCss / alignment) * alignment * ratio);
   if (!step) throw new Error('Pixel ratio and padding cannot form aligned tiles on this backend');
   return {step,overlap};
@@ -260,18 +303,21 @@ export async function renderArtwork(options) {
   const server = await serveProject(project,{offline:!s.allowedOrigins.length});
   let browser, encoded, scratch, committed = false, deadlineExpired = false;
   const interrupt = () => {void browser?.close().catch(()=>{});};
-  const deadline = setTimeout(()=>{deadlineExpired=true;interrupt();},Math.min(600000,Math.max(30000,s.timeout*8)));
+  const budgetMs = options.autopilot?.renderBudgetMs ?? Math.min(600000,Math.max(30000,s.timeout*8));
+  const deadline = setTimeout(()=>{deadlineExpired=true;interrupt();},budgetMs);
   signal?.addEventListener('abort',interrupt,{once:true});
   try {
     report('analyzing','Starting isolated Chromium');
     browser = await chromium.launch({channel:'chromium',headless:true,chromiumSandbox:true,
       executablePath:process.env.UVRS_CHROMIUM || undefined,
       args:['--force-webrtc-ip-handling-policy=disable_non_proxied_udp', '--dns-prefetch-disable',
-        ...(process.env.UVRS_SOFTWARE_TEST === '1' ? ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] : [])]});
+        ...(process.env.UVRS_SOFTWARE_TEST === '1' ? ['--use-gl=angle','--use-angle=swiftshader','--enable-unsafe-swiftshader'] : []),
+        ...(process.env.UVRS_WEBGPU_TEST === '1' ? ['--enable-unsafe-webgpu','--use-vulkan=swiftshader',
+          '--enable-features=Vulkan,CDPScreenshotNewSurface','--use-angle=swiftshader','--enable-unsafe-swiftshader'] : [])]});
     check();
     const selector = project.manifest.selector;
     const measure = page => page.evaluate(measureLayout,selector);
-    let detected, diagnostic, baseline, shader, gpu, runtime, singleCanvas;
+    let detected, diagnostic, baseline, shader, gpu, runtime, singleCanvas, samples, verifiedWebGPU;
     if (options.autopilot) {
       const hint = projectHint(project);
       const probe = {cssWidth:hint?.width || 1200,cssHeight:hint?.height || 900,ratio:1};
@@ -280,7 +326,9 @@ export async function renderArtwork(options) {
       try { detected = selectLayout(project,await measure(first.page),await measure(next.page)); }
       finally {await Promise.all([first.context.close(),next.context.close()]);}
       s = {...s,...planDimensions(detected.width,detected.height,options.autopilot),profile:options.autopilot.profile || 'adobe',
-        stock:true,format:'jpeg',transparent:false,strategy:'auto',allowSoftware:true};
+        stock:profiles[options.autopilot.profile || 'adobe'].stock,format:profiles[options.autopilot.profile || 'adobe'].format,
+        transparent:profiles[options.autopilot.profile || 'adobe'].format==='png',
+        strategy:'auto',allowSoftware:!(options.autopilot.hardwareOnly ?? false),sampleLimit:options.autopilot.sampleLimit ?? 512};
       warnings.push(...detected.notes);
     }
     validateSettings(s);
@@ -302,7 +350,16 @@ export async function renderArtwork(options) {
           if (typeof contract.ready === 'function') await contract.ready();
           else if (contract.ready) await contract.ready;
         });
-        return {...worker,layout};
+        const close = async ()=>{
+          try {
+            if (layout.contract.version===2 && !signal?.aborted) {
+              await worker.page.evaluate(()=>Promise.race([
+                Promise.resolve().then(()=>window.renderStudio?.dispose?.()),new Promise(resolve=>setTimeout(resolve,1200))
+              ])).catch(()=>{});
+            }
+          } finally {await worker.context.close();}
+        };
+        return {...worker,layout,close};
       } catch(error) {await worker.context.close();throw error;}
     };
     const args = (width,height,pixelRatio,tile=null) => ({width,height,cssWidth:viewport.cssWidth,cssHeight:viewport.cssHeight,pixelRatio,
@@ -310,37 +367,70 @@ export async function renderArtwork(options) {
     if (options.autopilot) {
       const worker = await prepare({...viewport,ratio:1});
       try {
-        await frame(worker.page,worker.layout.contract,args(viewport.cssWidth,viewport.cssHeight,1));
+        const checking = !worker.layout.contract.progressive;
+        if (checking) await frame(worker.page,worker.layout.contract,args(viewport.cssWidth,viewport.cssHeight,1),s,check,report);
         baseline = await measure(worker.page);
         assertLayout(baseline,viewport,project);
         worker.ensureLoaded();
-        if (baseline.canvases.some(c=>c.webgl)) {
-          gpu = await gpuProbe(worker.page);
-          gpu.estimatedFrameBytes = s.width * s.height * 24;
+        const kinds = gpuKind(baseline);
+        if (kinds.webgl) gpu = await gpuProbe(worker.page);
+        if (kinds.webgpu) {
+          verifiedWebGPU = await webGPUProbe(browser,server);
+          if (!verifiedWebGPU.operational) throw new Error('WebGPU probe failed: '+verifiedWebGPU.error);
+          gpu = {...gpu,webgpu:verifiedWebGPU,renderer:verifiedWebGPU.description || verifiedWebGPU.architecture,
+            software:!!gpu?.software || verifiedWebGPU.software,availableSystemBytes:os.freemem()};
         }
+        if (gpu) gpu.estimatedFrameBytes = s.width * s.height * 24;
         const [canvas] = baseline.canvases;
         singleCanvas = baseline.canvases.length === 1 && close(canvas.x,0) && close(canvas.y,0) &&
           close(canvas.cssWidth,viewport.cssWidth) && close(canvas.cssHeight,viewport.cssHeight) &&
           await worker.page.evaluate(()=>[...document.body.children].every(e=>['CANVAS','SCRIPT','STYLE'].includes(e.tagName)));
         if (singleCanvas) shader = legacyShader(baseline);
-        diagnostic = await worker.page.screenshot({type:'png',omitBackground:true,timeout:s.timeout});
+        if (checking) diagnostic = await worker.page.screenshot({type:'png',omitBackground:true,timeout:s.timeout});
         runtime = await readRuntime(worker.page);
-      } finally {await worker.context.close();}
+      } finally {await worker.close();}
     }
-    const backend = baseline?.contract.threeViewOffset ? 'Three.js / WebGL' : baseline ? [...new Set(baseline.canvases.map(c=>c.type || 'Canvas'))].join(' + ') ||
-      (baseline.rootSVG || baseline.svg ? 'SVG / DOM' : project.kind === 'tsx' || project.kind === 'jsx' ? 'React / DOM' : 'HTML / CSS') : project.kind;
+    const backend = baseline?.contract.engine || (baseline?.contract.threeViewOffset ? 'Three.js / WebGL' : baseline ? [...new Set(baseline.canvases.map(c=>c.type || 'Canvas'))].join(' + ') ||
+      (baseline.rootSVG || baseline.svg ? 'SVG / DOM' : project.kind === 'tsx' || project.kind === 'jsx' ? 'React / DOM' : 'HTML / CSS') : project.kind);
     if (options.autopilot) report('backend',backend + (gpu?.webgl && baseline.canvases.some(c=>c.webgl) ? ' · ' + gpu.renderer : ''),0,{backend,gpu});
+    const checkGPU = async (page,layout,width,height) => {
+      const {webgl,webgpu} = gpuKind(layout);
+      if (webgl && !s.allowSoftware && (!gpu?.webgl || gpu.software || gpu.renderer==='Unavailable'))
+        throw new Error('Hardware-only policy: WebGL renderer is software or unverified');
+      if (!webgpu) return;
+      verifiedWebGPU ??= await webGPUProbe(browser,server);
+      if (!verifiedWebGPU.operational) throw new Error('WebGPU probe failed: '+verifiedWebGPU.error);
+      for (const canvas of layout.canvases.filter(c=>c.type==='webgpu' && c.cssWidth && c.cssHeight)) {
+        if (!canvas.surface || canvas.surface.width!==canvas.width || canvas.surface.height!==canvas.height ||
+            Math.max(canvas.width,canvas.height)>canvas.surface.limit)
+          throw new Error('WebGPU canvas did not acquire a native-sized surface texture');
+      }
+      const devices = reportWebGPU(await page.evaluate(()=>globalThis.__uvrsGPU(true)),{requireHardware:!s.allowSoftware});
+      if (devices.every(device=>Math.max(width,height)>device.maxTextureDimension2D))
+        throw new Error('The rendered frame exceeds the observed WebGPU device texture limit');
+      gpu = {...gpu,webgpu:{...verifiedWebGPU,devices},software:!!gpu?.software || devices.some(device=>device.software),
+        availableSystemBytes:os.freemem(),renderer:devices[0].description || devices[0].architecture};
+    };
+    const checkMemory = (width,height,advanced) => {
+      const available = os.freemem();
+      const estimated = width*height*(advanced ? 24 : 12);
+      if (available>0 && estimated>available*.65)
+        throw new Error('Estimated native frame memory exceeds the available system memory budget');
+    };
     const captureDirect = async fixed2D => {
       const worker = await prepare(viewport,{fixed2D});
       try {
         const layout = worker.layout;
-        const webgl = Boolean(baseline?.canvases.some(c=>c.webgl) || layout.canvases.some(c=>c.webgl));
+        const webgl = Boolean((baseline && gpuKind(baseline).webgl) || gpuKind(layout).webgl);
         if (webgl || !options.autopilot) gpu ??= await gpuProbe(worker.page);
         if (options.autopilot && webgl && (Math.max(s.width,s.height) > Math.min(gpu.maxRenderbufferSize || Infinity,gpu.maxTextureSize || Infinity)
             || s.width > (gpu.maxViewport?.[0] || Infinity) || s.height > (gpu.maxViewport?.[1] || Infinity)))
           throw new Error('Full-frame WebGL dimensions exceed the probed rendering limits');
-        await frame(worker.page,layout.contract,args(s.width,s.height,viewport.ratio));
+        checkMemory(s.width,s.height,webgl || !!verifiedWebGPU);
+        const frameArgs = args(s.width,s.height,viewport.ratio);
+        samples = await frame(worker.page,layout.contract,frameArgs,s,check,report);
         const rendered = await measure(worker.page);
+        await checkGPU(worker.page,rendered,s.width,s.height);
         if (options.autopilot) assertLayout(rendered,viewport,project);
         assertCanvases(rendered.canvases,s,viewport.ratio,gpu || {});
         worker.ensureLoaded();
@@ -352,26 +442,32 @@ export async function renderArtwork(options) {
           return await worker.page.locator(selector).screenshot({type:'png',omitBackground:s.transparent,timeout:s.timeout});
         }
         return await worker.page.screenshot({type:'png',omitBackground:s.transparent,timeout:s.timeout});
-      } finally {await worker.context.close();}
+      } finally {await worker.close();}
     };
     const captureContractTiles = async () => {
       const worker = await prepare(viewport);
       try {
         const {contract} = worker.layout;
         if (!contract.tiles) throw new Error('Tiling requires verified renderStudio.capabilities.tiles or a compatible fullscreen shader');
-        if (baseline?.canvases.some(c=>c.webgl) || !options.autopilot) gpu ??= await gpuProbe(worker.page);
-        const out = await captureTiles(s,tilePlan(s,viewport,baseline?.canvases.some(c=>c.webgl) || !options.autopilot ? gpu : {},contract),async tile=>{
+        if ((baseline && gpuKind(baseline).webgl) || !options.autopilot) gpu ??= await gpuProbe(worker.page);
+        const out = await captureTiles(s,tilePlan(s,viewport,gpu || {},contract),async tile=>{
           check();
           await worker.page.setViewportSize({width:Math.round(tile.width / viewport.ratio),height:Math.round(tile.height / viewport.ratio)});
-          await frame(worker.page,contract,args(s.width,s.height,viewport.ratio,tile));
-          const rendered = await measure(worker.page);
-          assertCanvases(rendered.canvases,s,viewport.ratio,gpu || {});
-          worker.ensureLoaded();
-          return worker.page.screenshot({type:'png',omitBackground:s.transparent,timeout:s.timeout});
+          checkMemory(tile.width,tile.height,!!gpu);
+          const frameArgs = args(s.width,s.height,viewport.ratio,tile);
+          try {
+            const completed = await frame(worker.page,contract,frameArgs,s,check,report);
+            if (completed!==null) samples = Math.min(samples ?? completed,completed);
+            const rendered = await measure(worker.page);
+            await checkGPU(worker.page,rendered,tile.width,tile.height);
+            assertCanvases(rendered.canvases,s,viewport.ratio,gpu || {});
+            worker.ensureLoaded();
+            return await worker.page.screenshot({type:'png',omitBackground:s.transparent,timeout:s.timeout});
+          } finally {await finishFrame(worker.page,contract,frameArgs).catch(()=>{});}
         },report);
         runtime = await readRuntime(worker.page);
         return out;
-      } finally {await worker.context.close();}
+      } finally {await worker.close();}
     };
     const captureShaderTiles = async (target,ratio,edge=3072) => {
       const step = Math.min(edge,gpu.maxTextureSize,gpu.maxRenderbufferSize,...gpu.maxViewport);
@@ -398,7 +494,7 @@ export async function renderArtwork(options) {
             return output.toDataURL().split(',')[1];
           });
           return Buffer.from(image,'base64');
-        } finally {await worker.context.close();}
+        } finally {await worker.close();}
       },report);
     };
 
@@ -421,7 +517,7 @@ export async function renderArtwork(options) {
           worker.ensureLoaded();
           const image = await worker.page.evaluate(()=>document.querySelector('canvas').toDataURL().split(',')[1]);
           return Buffer.from(image,'base64');
-        } finally {await worker.context.close();}
+        } finally {await worker.close();}
       },report);
     };
     const strategies = s.strategy === 'tiled' ? [['tiled contract',captureContractTiles]] : [['direct',captureDirect]];
@@ -473,6 +569,7 @@ export async function renderArtwork(options) {
       }
     }
     if (!capture) throw new Error(errors.join('\n') || 'No compatible strategy produced a valid frame');
+    if (samples!==null && samples!==undefined) report('sampled','Finished '+samples+' samples',1,{samples});
     await browser.close();
     browser = null;
     clearTimeout(deadline);
@@ -480,6 +577,9 @@ export async function renderArtwork(options) {
     report('encoding','Encoding native pixels as sRGB');
     const dir = await fs.realpath(options.destination);
     const output = await outputPath(dir,project,options,s);
+    const available = await fs.statfs(dir).catch(()=>null);
+    if (available && available.bavail*available.bsize < 3*s.width*s.height)
+      throw new Error('Insufficient output disk space for the encoded image and publication files');
     scratch = options.workspace || await fs.mkdtemp(path.join(os.tmpdir(),'uvrs-encoded-'));
     await fs.mkdir(scratch,{recursive:true});
     encoded = path.join(scratch,(options.jobId || crypto.randomUUID()) + '.' + (s.format === 'jpeg' ? 'jpg' : s.format));
@@ -490,11 +590,13 @@ export async function renderArtwork(options) {
     check();
     const receipt = {encoded,output,settings:s,metadataOptions,extracted,runtime,source:project.file,gpu:gpu || {},
       requested,actual:{width:captured.width,height:captured.height},
-      detected,backend,strategy,recovered,warnings,logs,started,workspace:scratch,autopilot:!!options.autopilot,writeManifest:options.writeManifest};
+      detected,backend,strategy,samples,recovered,warnings,logs,started,workspace:scratch,autopilot:!!options.autopilot,writeManifest:options.writeManifest};
     await options.onCheckpoint?.(receipt);
     committed = true;
     return await retryEncodedMetadata({...options,recovery:receipt,initial:true});
   } catch(error) {
+    if (/WebGPU device lost|WebGL drawing buffer .*context was lost|presentation queue failed|external Instance reference|Target page, context or browser has been closed/i.test(error.message))
+      error.retryable = true;
     if (deadlineExpired) throw new Error('Render deadline exceeded; check author readiness/render promises');
     if (signal?.aborted && !error.recovery) throw new Error('Cancelled');
     throw error;
