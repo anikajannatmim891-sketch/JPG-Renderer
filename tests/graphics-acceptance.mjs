@@ -68,6 +68,12 @@ await test('Three.js GPU path tracer waits for convergence before publication',a
   await assert.rejects(render('pathtrace.ts',960,{sampleLimit:2}),/sample limit/);
   return report;
 });
+await test('Three.js GLTFLoader renders a pinned offline model and external buffer',async()=>{
+  const {result,report}=await render('model/index.html',2048);
+  assert.equal(result.actual.width,2048);
+  assert(result.gpu.webgl2);
+  return report;
+});
 await test('OffscreenCanvas worker completes a native-sized frame',async()=>{
   const {result,report}=await render('worker.html',2048);
   assert.match(result.backend,/OffscreenCanvas/);

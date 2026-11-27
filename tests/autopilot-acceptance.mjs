@@ -209,6 +209,10 @@ await run('200-entry SQLite batch, deduplication, pause, restart, and clean outp
       assert.equal((await fs.readdir(completed)).length,199);
       return {imported:200,persistedAcrossRestart:200,rendered:199,invalid:1};
     }
+    const pausedJob = queue.jobs[3];
+    await queue.control('remove',pausedJob.id);
+    assert.throws(()=>queue.get(pausedJob.id),/Unknown job/);
+    await fs.access(pausedJob.input.source);
     return {imported:200,persistedAcrossRestart:200,rendered:2,invalid:1,paused:197};
   } finally {await queue.shutdown();}
 });

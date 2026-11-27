@@ -250,7 +250,7 @@ export function Autopilot({view}:{view:ProductionView}) {
                 onChange={e=>setMetadataDraft({...metadataDraft,rating:Number(e.target.value)})}/></label>
               <button type="submit">Save and retry metadata</button>
             </form>}
-          {detail.status==='completed'&&<button onClick={()=>{control('remove',detail.id);setSelected(null);}}>Remove entry</button>}
+          {detail.status!=='running'&&<button onClick={()=>{control('remove',detail.id);setSelected(null);}}>Remove entry</button>}
         </div><button onClick={()=>setSelected(null)} aria-label="Close artwork details">×</button>
       </section>}
       <div className="production-footer">

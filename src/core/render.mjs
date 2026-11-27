@@ -66,8 +66,19 @@ async function openArtwork(browser, server, s, viewport, adapters) {
       if (entry.type()==='error' && /violates the following Content Security Policy|violates the following content security policy|content security policy.*blocked/i.test(entry.text()))
         failures.push('Blocked dependency: ' + entry.text());
     });
-    page.on('requestfailed',r=>failures.push('Asset failed: ' + r.url().replace(server.base,'project/')));
-    page.on('response',r=>{if(r.status()>=400)failures.push('HTTP ' + r.status() + ': ' + r.url().replace(server.base,'project/'));});
+    const localResponses = new WeakSet();
+    page.on('requestfailed',request=>{
+      const reason = request.failure()?.errorText;
+      // Fetch consumers such as Three.FileLoader may finish using a streamed
+      // local response before Chromium reports cancellation of the request.
+      // Actual load errors still surface through the author's readiness hook.
+      if (reason==='net::ERR_ABORTED' && localResponses.has(request) && ['fetch','xhr'].includes(request.resourceType())) return;
+      failures.push('Asset failed: '+request.url().replace(server.base,'project/')+(reason?' · '+reason:''));
+    });
+    page.on('response',response=>{
+      if (response.ok() && response.url().startsWith(server.base)) localResponses.add(response.request());
+      if (response.status()>=400) failures.push('HTTP '+response.status()+': '+response.url().replace(server.base,'project/'));
+    });
     await page.goto(server.url,{waitUntil:'load',timeout:s.timeout});
     await page.evaluate(async()=>{
       await document.fonts.ready;
@@ -395,6 +406,9 @@ export async function renderArtwork(options) {
     if (options.autopilot) report('backend',backend + (gpu?.webgl && baseline.canvases.some(c=>c.webgl) ? ' · ' + gpu.renderer : ''),0,{backend,gpu});
     const checkGPU = async (page,layout,width,height) => {
       const {webgl,webgpu} = gpuKind(layout);
+      if (!s.allowSoftware && layout.canvases.some(c=>c.type==='OffscreenCanvas') &&
+          (webgl || webgpu || !/Canvas 2D/i.test(layout.contract.engine || '')))
+        throw new Error('Hardware-only policy: the worker-backed canvas has no observable hardware device');
       if (webgl && !s.allowSoftware && (!gpu?.webgl || gpu.software || gpu.renderer==='Unavailable'))
         throw new Error('Hardware-only policy: WebGL renderer is software or unverified');
       if (!webgpu) return;

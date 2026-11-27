@@ -1,0 +1,15 @@
+<!doctype html><meta charset=utf-8><title>Offline glTF test</title><meta name=description content="A locally loaded model"><meta name=keywords content="model,2027,001">
+<style>body{margin:0}canvas{width:960px;height:540px;display:block}</style><script type="module">
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+const renderer=new THREE.WebGLRenderer({preserveDrawingBuffer:true,antialias:true});
+document.body.append(renderer.domElement);
+const scene=new THREE.Scene();scene.background=new THREE.Color('#173049');
+const camera=new THREE.PerspectiveCamera(38,16/9,.1,100);camera.position.set(3,2,4);
+camera.lookAt(0,0,0);
+const sun=new THREE.DirectionalLight('#fff0ca',3);sun.position.set(2,4,1);scene.add(sun);
+scene.add(new THREE.HemisphereLight('#b5daff','#403325',1.3));
+window.renderStudio={version:2,engine:'Three.js WebGL2 / GLTF',design:{width:960,height:540},
+async ready(){scene.add((await new GLTFLoader().loadAsync('mesh.gltf')).scene);},
+render({width,height}){renderer.setSize(width,height,false);renderer.render(scene,camera);}};
+</script>

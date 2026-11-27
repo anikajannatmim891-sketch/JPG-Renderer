@@ -224,7 +224,9 @@ export class RenderQueue {
           job.attempts = 0;
           delete job.error;
         } else if (action === 'remove') {
-          if (job.status !== 'completed') continue;
+          if (id && job.status==='running') throw new Error('Pause or cancel the active artwork before removing its entry');
+          if (!id && job.status!=='completed') continue;
+          if (job.recovery) cleanup.push(job.recovery.encoded);
           this.delete.run(job.id);
           this.byId.delete(job.id);
           if (job.hash) this.hashes.delete(job.hash);
